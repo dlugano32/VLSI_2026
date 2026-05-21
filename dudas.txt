@@ -1,0 +1,15 @@
+Dudas del TP FIR_IIR
+
+¿Esto que habiamos hablado de los typedef se hace así? Podemos recordar para que es que sirve?
+
+input logic signed [16-1:0][8-1:0] coef_v;
+
+typedef struct packed {
+    logic signed [NB_TAPS-1:0] coef;
+} tap_t;
+
+logic tap_t i_taps [N_TAPS-1:0];
+
+¿Como utilizamos las herramientas?
+    ¿Como puedo compilar el rtl?
+    ¿Como hacemos testbench? ¿Como corro el testbench?
