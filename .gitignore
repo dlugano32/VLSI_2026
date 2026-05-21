@@ -18,6 +18,7 @@
 #Do NOT ignore Verilog or VHDL files
 !*.vhd
 !*.v
+!*.sv
 
 #Constraint files
 #########
