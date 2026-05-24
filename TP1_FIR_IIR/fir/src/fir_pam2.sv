@@ -41,13 +41,13 @@
 //! @output o_data   Filtered output sample.
 
 module fir_pam2 #(
-    parameter int NB_O     = 8,
-    parameter int NBF_O    = 7,
+    parameter int NB_O     = 12,
+    parameter int NBF_O    = 10,
 
-    parameter int NB_TAPS  = 8,
-    parameter int NBF_TAPS = 7,
+    parameter int NB_TAPS  = 12,
+    parameter int NBF_TAPS = 10,
 
-    parameter int N_TAPS   = 4
+    parameter int N_TAPS   = 19
 ) (
     output logic signed [NB_O    - 1 : 0] o_data,
     input  logic signed [          1 : 0] i_data,
