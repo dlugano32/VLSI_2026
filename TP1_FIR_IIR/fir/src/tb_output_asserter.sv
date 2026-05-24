@@ -1,9 +1,9 @@
 //! @title Output asserter
-//! @file output_asserter.v
+//! @file tb_output_asserter.v
 //! @author dlugano
 //! @date 28/9/2024
 
-module output_asserter
+module tb_output_asserter
 #(
    parameter int NB_DATA         = 8,    //! Number of bits
    parameter int N_DATA          = 1024, //! Number of inputs samples
@@ -36,7 +36,7 @@ module output_asserter
     end
     end
 
-    //! Signal generator
+    //! Counter register
     always_ff @(posedge i_clock) begin : counter
        if(i_reset) begin
           counter_reg  <= '0;
@@ -45,9 +45,10 @@ module output_asserter
           counter_reg  <= counter_next;
     end
 
-    always_comb begin : signal_gen
-        flag_w       = (counter_reg == (N_DATA + N_CLK_DELAY));
-        counter_next = counter_reg;
+    //! Counter next-state logic
+    always_comb begin : counter_next_state
+        flag_w        = (counter_reg == (N_DATA + N_CLK_DELAY));
+        counter_next  = counter_reg;
         expected_data = '0;
 
         if (!flag_w) begin
@@ -56,11 +57,23 @@ module output_asserter
 
         if (!flag_w && (counter_reg >= N_CLK_DELAY)) begin
             expected_data = data[counter_reg - N_CLK_DELAY];
+        end
+    end
 
-            if (i_asserted !== expected_data)
-                $display("ASSERTION FAILED in %d: asserted != expected", counter_reg - N_CLK_DELAY);
-            else
-                $display("ASSERTION SUCCEEDED in %d: asserted == expected", counter_reg - N_CLK_DELAY);
+    //! Output assertion
+    always_ff @(posedge i_clock) begin : assertion_check
+        if (i_en && !flag_w && (counter_reg >= N_CLK_DELAY)) begin
+            if (i_asserted !== data[counter_reg - N_CLK_DELAY]) begin
+                $display("ASSERTION FAILED in %0d: asserted = %0h, expected = %0h",
+                        counter_reg - N_CLK_DELAY,
+                        i_asserted,
+                        data[counter_reg - N_CLK_DELAY]);
+            end else begin
+                $display("ASSERTION SUCCEEDED in %0d: asserted = %0h, expected = %0h",
+                        counter_reg - N_CLK_DELAY,
+                        i_asserted,
+                        data[counter_reg - N_CLK_DELAY]);
+            end
         end
     end
 

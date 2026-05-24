@@ -1,11 +1,11 @@
 //! @title Signal Generator
-//! @file signal_generator.v
+//! @file tb_signal_generator.v
 //! @author dlugano
 //! @date 28/9/2024
 
 //! - Signal generator from a file
 
-module signal_generator
+module tb_signal_generator
    #(
       parameter int NB_DATA       = 8,    //! Number of bits
       parameter int N_DATA        = 1024, //! Number of inputs samples

@@ -40,6 +40,8 @@
 //!
 //! @output o_data   Filtered output sample.
 
+`timescale 1ns/1ps
+
 module fir_pam2 #(
     parameter int NB_O     = 12,
     parameter int NBF_O    = 10,
@@ -57,18 +59,15 @@ module fir_pam2 #(
     input  logic clk
 );
     //! Local params
-    localparam int NB_I     = 2,
-    localparam int NBF_I    = 0,
-    localparam int NB_PROD  = NB_TAPS;
-    localparam int NBF_PROD = NBF_TAPS;
-    localparam int NB_ACC   = NB_PROD + $clog2(N_TAPS);
-    localparam int NBF_ACC  = NBF_PROD;
+    localparam int NB_I  = 2;
+    localparam int NBF_I = 0;
+    localparam int NBI_O = NB_O - NBF_O;
+    localparam int NB_PROD = NB_TAPS;
 
     //! Vars
     logic signed [NB_I    - 1 : 0] data_reg  [N_TAPS - 1 : 0];
     logic signed [NB_PROD - 1 : 0] prod_next [N_TAPS - 1 : 0];
     logic signed [NB_PROD - 1 : 0] prod_reg  [N_TAPS - 1 : 0];
-    logic signed [NB_ACC  - 1 : 0] acc_full_w;
 
     genvar i;
 
@@ -116,25 +115,90 @@ module fir_pam2 #(
         end
     endgenerate
 
-    //! Sum tree
-    sum_tree #(
-        .N    (N_TAPS),
-        .NB_I (NB_PROD),
-        .NB_O (NB_ACC)
-    ) u_sum_tree (
-        .i_op  (prod_reg),
-        .o_res (acc_full_w)
-    );
 
-    //! Final truncation & saturation
-    truncNsat #(
-        .NB_I   (NB_ACC),
-        .NBF_I  (NBF_ACC),
-        .NB_O   (NB_O),
-        .NBF_O  (NBF_O)
-    ) u_truncNsat_out (
-        .i_data (acc_full_w),
-        .o_data (o_data)
-    );
+    //! Sum tree
+    //! Variables
+    localparam int NB_LVL0 = NB_PROD; ;
+    localparam int NB_LVL1 = NB_LVL0 + 1;
+    localparam int NB_LVL2 = NB_LVL1 + 1;
+    localparam int NB_LVL3 = NB_LVL2 + 1;
+    localparam int NB_LVL4 = NB_LVL3 + 1;
+    localparam int NB_LVL5 = NB_LVL4 + 1;
+
+    localparam int N_LVL_0 =  N_TAPS; // 19
+    localparam int N_LVL_1 = (N_LVL_0 + 1) / 2; // 10
+    localparam int N_LVL_2 = (N_LVL_1 + 1) / 2; // 5
+    localparam int N_LVL_3 = (N_LVL_2 + 1) / 2; // 3
+    localparam int N_LVL_4 = (N_LVL_3 + 1) / 2; // 2
+    localparam int N_LVL_5 = (N_LVL_4 + 1) / 2; // 1
+    
+    logic signed [NB_LVL1 - 1 : 0] lvl_1 [0 : N_LVL_1 - 1];
+    logic signed [NB_LVL2 - 1 : 0] lvl_2 [0 : N_LVL_2 - 1];
+    logic signed [NB_LVL3 - 1 : 0] lvl_3 [0 : N_LVL_3 - 1];
+    logic signed [NB_LVL4 - 1 : 0] lvl_4 [0 : N_LVL_4 - 1];
+    logic signed [NB_LVL5 - 1 : 0] lvl_5 [0 : N_LVL_5 - 1];
+
+
+    //! The adder tree is explicitly expanded for the default 19-tap configuration.
+    //! Changing N_TAPS may require adapting the number of levels.
+    generate //! Generate sum tree with pairwise addition and passthrough for odd elements
+        for(i = 0; i < N_LVL_1; i++) begin : gen_level_1
+            if ((2*i + 1) < N_LVL_0) begin : gen_pair_sum
+                assign lvl_1[i] =
+                    $signed({{1{prod_reg[2*i][NB_LVL0-1]}},     prod_reg[2*i]}) +
+                    $signed({{1{prod_reg[2*i+1][NB_LVL0-1]}},   prod_reg[2*i+1]});
+            end else begin : gen_passthrough
+                assign lvl_1[i] =
+                    $signed({{1{prod_reg[2*i][NB_LVL0-1]}}, prod_reg[2*i]});
+            end
+        end
+
+        for(i = 0; i < N_LVL_2; i++) begin : gen_level_2
+            if ((2*i + 1) < N_LVL_1) begin : gen_pair_sum
+                assign lvl_2[i] =
+                    $signed({{1{lvl_1[2*i][NB_LVL1-1]}},     lvl_1[2*i]}) +
+                    $signed({{1{lvl_1[2*i+1][NB_LVL1-1]}},   lvl_1[2*i+1]});
+            end else begin : gen_passthrough
+                assign lvl_2[i] =
+                    $signed({{1{lvl_1[2*i][NB_LVL1-1]}}, lvl_1[2*i]});
+            end
+        end
+
+        for(i = 0; i < N_LVL_3; i++) begin : gen_level_3
+            if ((2*i + 1) < N_LVL_2) begin : gen_pair_sum
+                assign lvl_3[i] =
+                    $signed({{1{lvl_2[2*i][NB_LVL2-1]}},     lvl_2[2*i]}) +
+                    $signed({{1{lvl_2[2*i+1][NB_LVL2-1]}},   lvl_2[2*i+1]});
+            end else begin : gen_passthrough
+                assign lvl_3[i] =
+                    $signed({{1{lvl_2[2*i][NB_LVL2-1]}}, lvl_2[2*i]});
+            end
+        end
+
+        for(i = 0; i < N_LVL_4; i++) begin : gen_level_4
+            if ((2*i + 1) < N_LVL_3) begin : gen_pair_sum
+                assign lvl_4[i] =
+                    $signed({{1{lvl_3[2*i][NB_LVL3-1]}},     lvl_3[2*i]}) +
+                    $signed({{1{lvl_3[2*i+1][NB_LVL3-1]}},   lvl_3[2*i+1]});
+            end else begin : gen_passthrough
+                assign lvl_4[i] =
+                    $signed({{1{lvl_3[2*i][NB_LVL3-1]}}, lvl_3[2*i]});
+            end
+        end
+
+        for(i = 0; i < N_LVL_5; i++) begin : gen_level_5
+            if ((2*i + 1) < N_LVL_4) begin : gen_pair_sum
+                assign lvl_5[i] =
+                    $signed({{1{lvl_4[2*i][NB_LVL4-1]}},     lvl_4[2*i]}) +
+                    $signed({{1{lvl_4[2*i+1][NB_LVL4-1]}},   lvl_4[2*i+1]});
+            end else begin : gen_passthrough
+                assign lvl_5[i] =
+                    $signed({{1{lvl_4[2*i][NB_LVL4-1]}}, lvl_4[2*i]});
+            end
+        end
+    endgenerate
+
+    //! Output format S(NB_O, NBF_O). No rounding or saturation is applied.
+    assign o_data = lvl_5[0][NB_O - 1 : 0];
 
 endmodule

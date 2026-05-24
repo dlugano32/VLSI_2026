@@ -29,44 +29,38 @@ module sum_tree #(
     output logic signed [NB_O - 1 : 0] o_res
 );
 
-    localparam int N_LEVELS  = $clog2(N);
+    localparam int N_LEVELS = $clog2(N);
 
-    // Cantidad máxima de nodos por nivel: N
+    // Tree levels.
+    // level[0] contains the sign-extended inputs.
+    // level[N_LEVELS][0] contains the final accumulated result.
     logic signed [NB_O - 1 : 0] level [0 : N_LEVELS][0 : N - 1];
 
     genvar i, l;
 
-    // Nivel 0: extender entradas al ancho final
+    // Input sign extension
     generate
         for (i = 0; i < N; i++) begin : gen_input_extend
             assign level[0][i] = {{(NB_O - NB_I){i_op[i][NB_I - 1]}}, i_op[i]};
         end
     endgenerate
 
-    // Nodos por nivel
-    function automatic int nodes_at_level(input int level_idx);
-        int nodes;
-        begin
-            nodes = N;
-            for (int k = 0; k < level_idx; k++) begin
-                nodes = (nodes + 1) / 2;
-            end
-            return nodes;
-        end
-    endfunction
-
+    // Adder tree
     generate
         for (l = 0; l < N_LEVELS; l++) begin : gen_levels
 
-            localparam int CUR_N  = nodes_at_level(l);
-            localparam int NEXT_N = nodes_at_level(l + 1);
+            localparam int CUR_DIV  = (1 << l);
+            localparam int NEXT_DIV = (1 << (l + 1));
+
+            localparam int CUR_N  = (N + CUR_DIV  - 1) / CUR_DIV;
+            localparam int NEXT_N = (N + NEXT_DIV - 1) / NEXT_DIV;
 
             for (i = 0; i < NEXT_N; i++) begin : gen_adders
 
                 if ((2*i + 1) < CUR_N) begin : gen_pair_sum
-                    assign level[l+1][i] = level[l][2*i] + level[l][2*i+1];
+                    assign level[l + 1][i] = level[l][2*i] + level[l][2*i + 1];
                 end else begin : gen_passthrough
-                    assign level[l+1][i] = level[l][2*i];
+                    assign level[l + 1][i] = level[l][2*i];
                 end
 
             end

@@ -59,7 +59,7 @@ module fir_pam2_folded #(
     parameter int N_TAPS   = 19
 ) (
     output logic signed [NB_O    - 1 : 0] o_data,
-    input  logic signed [          1 : 0] i_data,   //! Entrada en formato PAM-2
+    input  logic signed [          1 : 0] i_data,   //! Input in format PAM-2
     input  logic signed [NB_TAPS - 1 : 0] i_taps [((N_TAPS + 1) / 2) - 1 : 0],    
     input  logic i_en,   //! Enable
     input  logic i_srst, //! Reset
@@ -68,12 +68,10 @@ module fir_pam2_folded #(
 
     localparam int NB_I     = 2;
     localparam int NBF_I    = 0;
+    localparam int NBI_O = NB_O - NBF_O;
     localparam int N_PAIRS  =  N_TAPS / 2;
     localparam int N_PREADD = (N_TAPS + 1) / 2;
     localparam int NB_PROD  =  NB_TAPS + 1;     // Product width is extended by one bit to represent `±2h`.
-    localparam int NBF_PROD =  NBF_TAPS;
-    localparam int NB_ACC   =  NB_PROD + $clog2(N_PREADD);
-    localparam int NBF_ACC  =  NBF_PROD;
 
     //! Vars
     logic signed [NB_I    - 1 : 0] data_reg  [N_TAPS   - 1 : 0];
@@ -81,7 +79,6 @@ module fir_pam2_folded #(
     logic signed [NB_PROD - 1 : 0] prod_next [N_PREADD - 1 : 0];
     logic signed [NB_PROD - 1 : 0] prod_reg  [N_PREADD - 1 : 0];
     logic signed [NB_PROD - 1 : 0] taps_ext  [N_PREADD - 1 : 0];
-    logic signed [NB_ACC  - 1 : 0] acc_full_w;
 
     genvar i;
 
@@ -106,7 +103,8 @@ module fir_pam2_folded #(
         end
     endgenerate
 
-    //! Pre-adders
+    //! Pre-adders for symmetric input pairs
+    //! For odd `N_TAPS`, the center tap is passed through without addition.
     generate
         for (i = 0; i < N_PREADD; i++) begin : gen_pre_adders
 
@@ -125,6 +123,8 @@ module fir_pam2_folded #(
     endgenerate
 
     //! Taps product with pre-added inputs
+    //! The pre-added PAM-2 values are decoded as {-2, -1, 0, +1, +2}
+    //! and mapped to {-2*tap, -tap, 0, +tap, +2*tap}.
     generate
         for (i = 0; i < N_PREADD; i++) begin : gen_mux_product
             
@@ -164,24 +164,77 @@ module fir_pam2_folded #(
     endgenerate
 
     //! Sum tree
-    sum_tree #(
-        .N    (N_PREADD),
-        .NB_I (NB_PROD),
-        .NB_O (NB_ACC)
-    ) u_sum_tree (
-        .i_op  (prod_reg),
-        .o_res (acc_full_w)
-    );
+    //! The tree accumulates the N_PREADD folded products. Each level sign-extends
+    //! its operands before addition to avoid intermediate overflow.
+    //! Variables
+    localparam int NB_LVL0 = NB_PROD; ;
+    localparam int NB_LVL1 = NB_LVL0 + 1;
+    localparam int NB_LVL2 = NB_LVL1 + 1;
+    localparam int NB_LVL3 = NB_LVL2 + 1;
+    localparam int NB_LVL4 = NB_LVL3 + 1;
 
-    //! Final truncation & saturation
-    truncNsat #(
-        .NB_I   (NB_ACC),
-        .NBF_I  (NBF_ACC),
-        .NB_O   (NB_O),
-        .NBF_O  (NBF_O)
-    ) u_truncNsat_out (
-        .i_data (acc_full_w),
-        .o_data (o_data)
-    );
+    localparam int N_LVL_0 =  N_PREADD; // 10
+    localparam int N_LVL_1 = (N_LVL_0  + 1) / 2; // 5
+    localparam int N_LVL_2 = (N_LVL_1 + 1) / 2;  // 3
+    localparam int N_LVL_3 = (N_LVL_2 + 1) / 2;  // 2
+    localparam int N_LVL_4 = (N_LVL_3 + 1) / 2;  // 1
+
+    logic signed [NB_LVL1 - 1 : 0] lvl_1 [0 : N_LVL_1 - 1];
+    logic signed [NB_LVL2 - 1 : 0] lvl_2 [0 : N_LVL_2 - 1];
+    logic signed [NB_LVL3 - 1 : 0] lvl_3 [0 : N_LVL_3 - 1];
+    logic signed [NB_LVL4 - 1 : 0] lvl_4 [0 : N_LVL_4 - 1];
+
+    //! The adder tree is explicitly expanded for the default 19-tap configuration.
+    //! Changing N_TAPS may require adapting the number of levels.
+    generate //! Generate sum tree with pairwise addition and passthrough for odd elements
+        for(i = 0; i < N_LVL_1; i++) begin : gen_level_1
+            if ((2*i + 1) < N_LVL_0) begin : gen_pair_sum
+                assign lvl_1[i] =
+                    $signed({{1{prod_reg[2*i][NB_LVL0-1]}},     prod_reg[2*i]}) +
+                    $signed({{1{prod_reg[2*i+1][NB_LVL0-1]}},   prod_reg[2*i+1]});
+            end else begin : gen_passthrough
+                assign lvl_1[i] =
+                    $signed({{1{prod_reg[2*i][NB_LVL0-1]}}, prod_reg[2*i]});
+            end
+        end
+
+        for(i = 0; i < N_LVL_2; i++) begin : gen_level_2
+            if ((2*i + 1) < N_LVL_1) begin : gen_pair_sum
+                assign lvl_2[i] =
+                    $signed({{1{lvl_1[2*i][NB_LVL1-1]}},     lvl_1[2*i]}) +
+                    $signed({{1{lvl_1[2*i+1][NB_LVL1-1]}},   lvl_1[2*i+1]});
+            end else begin : gen_passthrough
+                assign lvl_2[i] =
+                    $signed({{1{lvl_1[2*i][NB_LVL1-1]}}, lvl_1[2*i]});
+            end
+        end
+
+        for(i = 0; i < N_LVL_3; i++) begin : gen_level_3
+            if ((2*i + 1) < N_LVL_2) begin : gen_pair_sum
+                assign lvl_3[i] =
+                    $signed({{1{lvl_2[2*i][NB_LVL2-1]}},     lvl_2[2*i]}) +
+                    $signed({{1{lvl_2[2*i+1][NB_LVL2-1]}},   lvl_2[2*i+1]});
+            end else begin : gen_passthrough
+                assign lvl_3[i] =
+                    $signed({{1{lvl_2[2*i][NB_LVL2-1]}}, lvl_2[2*i]});
+            end
+        end
+
+        for(i = 0; i < N_LVL_4; i++) begin : gen_level_4
+            if ((2*i + 1) < N_LVL_3) begin : gen_pair_sum
+                assign lvl_4[i] =
+                    $signed({{1{lvl_3[2*i][NB_LVL3-1]}},     lvl_3[2*i]}) +
+                    $signed({{1{lvl_3[2*i+1][NB_LVL3-1]}},   lvl_3[2*i+1]});
+            end else begin : gen_passthrough
+                assign lvl_4[i] =
+                    $signed({{1{lvl_3[2*i][NB_LVL3-1]}}, lvl_3[2*i]});
+            end
+        end
+
+    endgenerate
+
+    //! Output truncation from accumulator format S(NB_LVL4, NBF_TAPS)
+    //! to output format S(NB_O, NBF_O). No rounding or saturation is applied.
+    assign o_data = {lvl_4[0][(NB_LVL4 - 1) -: NBI_O], lvl_4[0][NBF_TAPS -1 -: NBF_O]};
 
 endmodule
