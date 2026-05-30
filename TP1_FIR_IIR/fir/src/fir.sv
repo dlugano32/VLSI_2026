@@ -22,7 +22,7 @@ module fir #(
     input  logic signed [NB_TAPS - 1 : 0] i_taps [N_TAPS - 1 : 0],
     input  logic i_en,   //! Enable
     input  logic i_srst, //! Reset
-    input  logic clk     //! Clock
+    input  logic i_clk     //! Clock
 );
 
     localparam int NB_PROD  = NB_I + NB_TAPS;
@@ -40,7 +40,7 @@ module fir #(
     genvar i;
 
     //! Shift register for input data
-    always_ff @(posedge clk) begin : shift_reg_0
+    always_ff @(posedge i_clk) begin : shift_reg_0
         if (i_srst) begin
             data_reg[0] <= '0;
         end else if (i_en) begin
@@ -50,7 +50,7 @@ module fir #(
 
     generate
         for (i = 1; i < N_TAPS; i++) begin : gen_shift_reg
-            always_ff @(posedge clk) begin : shift_reg
+            always_ff @(posedge i_clk) begin : shift_reg
                 if (i_srst) begin
                     data_reg[i] <= '0;
                 end else if (i_en) begin
@@ -70,7 +70,7 @@ module fir #(
     //! Product register
     generate
         for (i = 0; i < N_TAPS; i++) begin : gen_product_reg
-            always_ff @(posedge clk) begin : product_reg
+            always_ff @(posedge i_clk) begin : product_reg
                 if (i_srst) begin
                     prod_reg[i] <= '0;
                 end else if (i_en) begin

@@ -164,77 +164,36 @@ module fir_pam2_folded #(
     endgenerate
 
     //! Sum tree
-    //! The tree accumulates the N_PREADD folded products. Each level sign-extends
-    //! its operands before addition to avoid intermediate overflow.
-    //! Variables
-    localparam int NB_LVL0 = NB_PROD; ;
-    localparam int NB_LVL1 = NB_LVL0 + 1;
-    localparam int NB_LVL2 = NB_LVL1 + 1;
-    localparam int NB_LVL3 = NB_LVL2 + 1;
-    localparam int NB_LVL4 = NB_LVL3 + 1;
+    localparam int N_LEVELS = $clog2(N_PREADD);
+    localparam int NB_ACC   = NB_PROD + $clog2(N_PREADD);
 
-    localparam int N_LVL_0 =  N_PREADD; // 10
-    localparam int N_LVL_1 = (N_LVL_0  + 1) / 2; // 5
-    localparam int N_LVL_2 = (N_LVL_1 + 1) / 2;  // 3
-    localparam int N_LVL_3 = (N_LVL_2 + 1) / 2;  // 2
-    localparam int N_LVL_4 = (N_LVL_3 + 1) / 2;  // 1
+    logic signed [NB_ACC - 1 : 0] sum_tree [0 : N_LEVELS][0 : N_PREADD - 1];
 
-    logic signed [NB_LVL1 - 1 : 0] lvl_1 [0 : N_LVL_1 - 1];
-    logic signed [NB_LVL2 - 1 : 0] lvl_2 [0 : N_LVL_2 - 1];
-    logic signed [NB_LVL3 - 1 : 0] lvl_3 [0 : N_LVL_3 - 1];
-    logic signed [NB_LVL4 - 1 : 0] lvl_4 [0 : N_LVL_4 - 1];
+    genvar lvl;
+    genvar j;
 
-    //! The adder tree is explicitly expanded for the default 19-tap configuration.
-    //! Changing N_TAPS may require adapting the number of levels.
-    generate //! Generate sum tree with pairwise addition and passthrough for odd elements
-        for(i = 0; i < N_LVL_1; i++) begin : gen_level_1
-            if ((2*i + 1) < N_LVL_0) begin : gen_pair_sum
-                assign lvl_1[i] =
-                    $signed({{1{prod_reg[2*i][NB_LVL0-1]}},     prod_reg[2*i]}) +
-                    $signed({{1{prod_reg[2*i+1][NB_LVL0-1]}},   prod_reg[2*i+1]});
-            end else begin : gen_passthrough
-                assign lvl_1[i] =
-                    $signed({{1{prod_reg[2*i][NB_LVL0-1]}}, prod_reg[2*i]});
-            end
+    generate
+        for (j = 0; j < N_PREADD; j++) begin : gen_sum_tree_input
+            assign sum_tree[0][j] =
+                $signed({{(NB_ACC-NB_PROD){prod_reg[j][NB_PROD-1]}}, prod_reg[j]});
         end
 
-        for(i = 0; i < N_LVL_2; i++) begin : gen_level_2
-            if ((2*i + 1) < N_LVL_1) begin : gen_pair_sum
-                assign lvl_2[i] =
-                    $signed({{1{lvl_1[2*i][NB_LVL1-1]}},     lvl_1[2*i]}) +
-                    $signed({{1{lvl_1[2*i+1][NB_LVL1-1]}},   lvl_1[2*i+1]});
-            end else begin : gen_passthrough
-                assign lvl_2[i] =
-                    $signed({{1{lvl_1[2*i][NB_LVL1-1]}}, lvl_1[2*i]});
+        for (lvl = 0; lvl < N_LEVELS; lvl++) begin : gen_sum_tree_level
+            localparam int N_IN  = (N_PREADD + (1 << lvl)     - 1) >> lvl;
+            localparam int N_OUT = (N_PREADD + (1 << (lvl+1)) - 1) >> (lvl+1);
+
+            for (j = 0; j < N_OUT; j++) begin : gen_sum_tree_node
+                if ((2*j + 1) < N_IN) begin : gen_pair_sum
+                    assign sum_tree[lvl+1][j] =
+                        sum_tree[lvl][2*j] + sum_tree[lvl][2*j + 1];
+                end else begin : gen_passthrough
+                    assign sum_tree[lvl+1][j] =
+                        sum_tree[lvl][2*j];
+                end
             end
         end
-
-        for(i = 0; i < N_LVL_3; i++) begin : gen_level_3
-            if ((2*i + 1) < N_LVL_2) begin : gen_pair_sum
-                assign lvl_3[i] =
-                    $signed({{1{lvl_2[2*i][NB_LVL2-1]}},     lvl_2[2*i]}) +
-                    $signed({{1{lvl_2[2*i+1][NB_LVL2-1]}},   lvl_2[2*i+1]});
-            end else begin : gen_passthrough
-                assign lvl_3[i] =
-                    $signed({{1{lvl_2[2*i][NB_LVL2-1]}}, lvl_2[2*i]});
-            end
-        end
-
-        for(i = 0; i < N_LVL_4; i++) begin : gen_level_4
-            if ((2*i + 1) < N_LVL_3) begin : gen_pair_sum
-                assign lvl_4[i] =
-                    $signed({{1{lvl_3[2*i][NB_LVL3-1]}},     lvl_3[2*i]}) +
-                    $signed({{1{lvl_3[2*i+1][NB_LVL3-1]}},   lvl_3[2*i+1]});
-            end else begin : gen_passthrough
-                assign lvl_4[i] =
-                    $signed({{1{lvl_3[2*i][NB_LVL3-1]}}, lvl_3[2*i]});
-            end
-        end
-
     endgenerate
 
-    //! Output truncation from accumulator format S(NB_LVL4, NBF_TAPS)
-    //! to output format S(NB_O, NBF_O). No rounding or saturation is applied.
-    assign o_data = {lvl_4[0][(NB_LVL4 - 1) -: NBI_O], lvl_4[0][NBF_TAPS -1 -: NBF_O]};
+    assign o_data = sum_tree[N_LEVELS][0][NB_O - 1 : 0];
 
 endmodule
