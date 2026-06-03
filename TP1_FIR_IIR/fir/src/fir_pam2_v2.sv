@@ -19,7 +19,7 @@
 //! - The internal product format is equal to the coefficient format.
 //! - The accumulator grows by `$clog2(N_TAPS)` bits to avoid internal overflow.
 //! - The accumulator fractional precision is given by `NBF_TAPS`.
-//! - The output is truncated and saturated to `S(NB_O, NBF_O)`.
+//! - The output is truncated to `S(NB_O, NBF_O)`.
 //!
 //! @note
 //! This implementation assumes that coefficients do not take the minimum
@@ -132,8 +132,8 @@ module fir_pam2 #(
         end
 
         for (lvl = 0; lvl < N_LEVELS; lvl++) begin : gen_sum_tree_level
-            localparam int N_IN  = (N_TAPS + (1 << lvl)     - 1) >> lvl;
-            localparam int N_OUT = (N_TAPS + (1 << (lvl+1)) - 1) >> (lvl+1);
+            localparam int N_IN  = (N_TAPS + (1 << lvl)     - 1) >> lvl;     // ceil(N_TAPS / 2^lvl)
+            localparam int N_OUT = (N_TAPS + (1 << (lvl+1)) - 1) >> (lvl+1); // ceil(N_TAPS / 2^(lvl+1))
 
             for (j = 0; j < N_OUT; j++) begin : gen_sum_tree_node
                 if ((2*j + 1) < N_IN) begin : gen_pair_sum
@@ -147,6 +147,7 @@ module fir_pam2 #(
         end
     endgenerate
 
+    //! Asigno la salida del arbol de suma, truncado en los bits de salida.
     assign o_data = sum_tree[N_LEVELS][0][NB_O - 1 : 0];
 
 endmodule

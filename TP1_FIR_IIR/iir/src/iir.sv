@@ -1,3 +1,50 @@
+//! @title Fixed-Point First-Order IIR DC Blocker
+//! @file iir.sv
+//! @author Damian Lugano
+//! @date 30-5-2026
+//!
+//! @brief Generic signed fixed-point first-order IIR high-pass filter,
+//! intended for DC offset removal.
+//!
+//! This module implements a first-order IIR DC blocker with transfer function:
+//!
+//!     H(z) = (1 - z^-1) / (1 - a z^-1)
+//!
+//! using the difference equation:
+//!
+//!     y[n] = x[n] - x[n-1] + a y[n-1]
+//!
+//! @details
+//! - Intended for DC removal in sampled fixed-point signals.
+//! - The input format is fixed to signed `S(8,7)`.
+//! - The output format is configurable as `S(NB_O, NBF_O)`.
+//! - The feedback coefficient `a` is configurable as `S(NB_A, NBF_A)`.
+//! - The previous input sample `x[n-1]` is stored with input precision.
+//! - The previous output sample `y[n-1]` is stored with output precision.
+//! - The input difference is computed as:
+//!   - `S(8,7) - S(8,7) -> S(9,7)`.
+//! - The feedback product is computed as:
+//!   - `S(NB_A,NBF_A) * S(NB_O,NBF_O) -> S(NB_A+NB_O, NBF_A+NBF_O)`.
+//! - The input difference is resized to the feedback product format before
+//!   accumulation.
+//! - The accumulator grows by one bit to avoid immediate overflow in the sum.
+//! - The final result is rounded and saturated to `S(NB_O, NBF_O)` using
+//!   `roundNsat`.
+//!
+//!
+//! @param NB_O   Output total bit width.
+//! @param NBF_O  Output fractional bit width.
+//! @param NB_A   Feedback coefficient total bit width.
+//! @param NBF_A  Feedback coefficient fractional bit width.
+//!
+//! @input  i_data  Input sample in signed `S(8,7)` format.
+//! @input  i_a     Feedback coefficient `a`.
+//! @input  i_en    Clock enable.
+//! @input  i_srst  Synchronous reset.
+//! @input  i_clk   System clock.
+//!
+//! @output o_data  Filtered output sample.
+
 `timescale 1ns/1ps
 
 module iir #(
@@ -65,12 +112,12 @@ module iir #(
                    $signed({feedback[NB_FB - 1], feedback});
     
     //! S(17,14) -> S(8,7)
-    truncNsat #(
+    roundNsat #(
         .NB_I   (NB_FB + 1),
         .NBF_I  (NBF_FB),
         .NB_O   (NB_O),
         .NBF_O  (NBF_O)
-    ) u_truncNsat_sum (
+    ) u_roundNsat_sum (
         .i_data (y_sum),
         .o_data (y_next)
     );

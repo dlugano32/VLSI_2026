@@ -51,7 +51,7 @@ module tb_fir ();
         .i_taps  (i_taps),
         .i_srst  (i_srst),
         .i_en    (i_en),
-        .clk     (clk)
+        .i_clk     (clk)
       );
 
     tb_signal_generator

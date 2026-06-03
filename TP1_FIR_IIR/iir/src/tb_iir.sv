@@ -3,7 +3,7 @@
 //! @title IIR Filter - Testbench
 //! @file tb_iir.v
 //! @author dlugano
-//! @date 28/9/2024
+//! @date 29/5/2026
 
 module tb_iir ();
   parameter int NB_I   = 8;
@@ -22,12 +22,12 @@ module tb_iir ();
   logic signed [NB_I     -1 : 0] i_data;
   logic i_en;
   logic i_srst;
-  logic clk;
+  logic i_clk;
 
   logic i_flag;
   logic o_flag;
 
-  parameter hex i_a = 8'h7D; //! a = 0.98 in S(8,7)
+  parameter logic signed [NB_A - 1 : 0] i_a = 8'sh7D;
 
   //! Instance of FIR
   iir
@@ -44,7 +44,7 @@ module tb_iir ();
         .i_a     (i_a),
         .i_srst  (i_srst),
         .i_en    (i_en),
-        .clk     (clk)
+        .i_clk   (i_clk)
       );
 
     tb_signal_generator
@@ -58,7 +58,7 @@ module tb_iir ();
         .o_signal(i_data),
         .o_flag(i_flag),
         .i_en(i_en),
-        .i_clock(clk),
+        .i_clock(i_clk),
         .i_reset(i_srst)
       );
 
@@ -75,13 +75,13 @@ module tb_iir ();
         .o_flag(o_flag),
         .i_asserted(o_data),
         .i_en(i_en),
-        .i_clock(clk),
+        .i_clock(i_clk),
         .i_reset(i_srst)
       );
 
   //! Clock
-  initial clk=0;
-  always #5 clk = ~clk;
+  initial i_clk=0;
+  always #5 i_clk = ~i_clk;
   
   //! Waves
   initial begin $dumpfile("sim/waves/iir.vcd"); 
@@ -91,21 +91,21 @@ module tb_iir ();
       $display("");
       $display("Simulation Started");
   
-      clk     = 1'b0;
+      i_clk     = 1'b0;
       i_en    = 1'b0;
       i_srst  = 1'b1;
   
-      repeat (5) @(posedge clk);
+      repeat (5) @(posedge i_clk);
   
       i_srst = 1'b0;
   
-      repeat (2) @(posedge clk);
+      repeat (2) @(posedge i_clk);
   
       i_en = 1'b1;
   
       wait(o_flag);
   
-      @(posedge clk);
+      @(posedge i_clk);
   
       i_en = 1'b0;
   
