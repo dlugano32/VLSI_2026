@@ -3,7 +3,7 @@
 //! @author Damian Lugano
 //! @date 11-5-2026
 
-//! - Syncronizer module to transfer a signal from one clock domain to another. It uses a two-stage flip-flop synchronizer to minimize the risk of metastability. 
+//! - Syncronizer module to transfer a signal from one clock domain to another slower. It uses a two-stage flip-flop synchronizer to minimize the risk of metastability. 
 //!     The output `o_req` will be high for one clock cycle of `clk_b` when a rising edge is detected on `i_req` in the `clk_a` domain.
 //!     Standard cells are usually used for this. When using personalized cells, it is important to notify PD team to ensure that the FFs from the synchronizer 
 //!     are close to each other to minimize the delay.
