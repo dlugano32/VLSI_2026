@@ -1,31 +1,56 @@
 `timescale 1ns/1ps
 
 module sync_bus #(
-    parameter int NB_DATA = 3,
-    parameter int PIPE    = 3
+    parameter int WIDTH = 8,
+    parameter int PIPE  = 4
 ) (
-    input  logic                  i_clk,
-    input  logic                  i_rst,
-    input  logic [NB_DATA-1 : 0]  i_data,
-    output logic [NB_DATA-1 : 0]  o_data
+    input  logic i_clk_a,
+    input  logic i_clk_b,
+    input  logic i_rst_a,
+    input  logic i_rst_b,
+    input  logic [WIDTH - 1 : 0] i_data,
+    output logic [WIDTH - 1 : 0] o_data
 );
 
-    logic [NB_DATA-1 : 0] pipe [PIPE-1 : 0];
+    //! Source-domain toggle
+    logic [WIDTH - 1 : 0] toggle;
 
-    always_ff @(posedge i_clk) begin
-        if (i_rst) begin
+    //! Destination-domain synchronization pipeline
+    logic [WIDTH - 1 : 0] pipe [PIPE - 1 : 0];
+
+    //! Toggle generation in source clock domain
+    genvar i;
+    generate
+        for(i=0; i<WIDTH ; i++) begin
+            always_ff @(posedge i_clk_a) begin : src_toggle
+                if (i_rst_a) begin
+                    toggle[i] <= '0;
+                end else if (i_data[i]) begin
+                    toggle[i] <= ~toggle[i];
+                end
+            end
+        end
+    endgenerate
+
+    //! Toggle synchronization into destination clock domain
+    always_ff @(posedge i_clk_b) begin : dst_pipe
+        if (i_rst_b) begin
             for (int i = 0; i < PIPE; i++) begin
                 pipe[i] <= '0;
             end
         end else begin
-            pipe[0] <= i_data;
+            pipe[0] <= toggle;
 
             for (int i = 1; i < PIPE; i++) begin
-                pipe[i] <= pipe[i-1];
+                pipe[i] <= pipe[i - 1];
             end
         end
     end
 
-    assign o_data = pipe[PIPE-1];
+    //! Edge detection in destination clock domain
+    generate
+        for (i=0; i<WIDTH; i++)
+            assign o_data[i] = pipe[PIPE - 1][i] ^ pipe[PIPE - 2][i];
+    endgenerate
 
 endmodule
