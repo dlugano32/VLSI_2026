@@ -40,7 +40,7 @@
 
 `timescale 1ns/1ps
 
-module sync #(
+module req_sync #(
     parameter int PIPE = 4
 ) (
     input  logic i_clk_a,
