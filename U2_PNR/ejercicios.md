@@ -152,11 +152,96 @@ FC tiene una regla de via fixing en ```route_opt``` que agrega metal extra para 
 
 Corré el flujo completo del filtro FIR (syn + pnr) y completá esta tabla:
 
+Se hizo sintesis a 500MHz
+
 | Métrica                     | Post-Sintesis  | Post-Placement  | Post-Routing |
 |----------------------------:|---------------:|:---------------:|-------------:|
-| WNS (ns)                    | +0.01nS        | +0.00ns         |              |
-| TNS (ns)                    | -1.79ns        | -1.94ns         |              |
-| Area ($\mu\text{m}$)        | 3034           | 3343            | 3315         |
+| WNS (ns)                    | +0.01nS        | +0.00ns         | -0.01ns      |
+| TNS (ns)                    | -1.79ns        | -1.94ns         | -1.98        |
+| Area ($\mu\text{m}$^2)      | 3034           | 3343            | 3315         |
 | %LVT                        | 55             |                 |              |
-| #Celdas                     | 857            | 900             |              |
+| #Celdas                     | 857            | 900             | 903          |
 | Potencia Dinámica ($\mu W$) | 54.3           | 69.1            | 72.0         |
+
+a) ¿El WNS empeoró entre síntesis y routing? ¿Cuánto?
+
+Si, empeoró porque en síntesis no se tienen en cuenta los delays de los wires que interconectan las celdas, ni el skew de los clocks, etc.
+
+b) ¿El área cambió entre síntesis y routing? ¿Por qué?
+
+Sí, el área cambió. En síntesis se reporta una estimación basada en las celdas lógicas utilizadas. Durante implementación física pueden insertarse buffers o cambiar el tipo de celdas para cumplir timing, aumentando el área efectiva.
+
+c) ¿El % de LVT cambió? Si aumentó post-routing, ¿por qué?
+
+
+### 9.6 Ejercicio Integrador: Filtro FIR de 19 taps - Flujo completo
+
+Corré el flujo completo (syn + pnr) del filtro FIR que diseñaron en el TP.
+
+#### Paso 1: Síntesis
+
+``` make syn ```
+
+Se hizo la sintesis a 1GHz
+
+Del reporte post-síntesis respondé:
+
+a) ¿Cuántas celdas tiene el diseño sintetizado?
+
+El diseño tiene 923 celdas
+
+b) ¿Cuántos flip-flops? (en el reporte de área, buscá DFFX)
+
+El diseño tiene 109 FF
+
+c) ¿Cuál es el slack? ¿Qué frecuencia máxima soporta?
+
+El slack es 0.00ns. Por lo que la frecuencia máxima que soporta esta sintesis es 1GHz.
+
+d) ¿Qué porcentaje de celdas son LVT vs HVT?
+
+El porcentaje de LVT es 77\% y el de HVT 23\%
+
+#### Paso 2: Floorplan
+
+Con el área de síntesis, calculá el tamaño del core para 60% de utilización y editá el floorplan.tcl.
+
+El área total de las celdas es $3151\mu\text{m}^2$, por lo que a 60% de utilización el área del floorplan sería $5252\mu\text{m}^2$
+
+#### Paso 3: P&R
+
+``` make pnr ```
+
+Del reporte post-P&R respondé:
+
+a) ¿El timing cerró? Compará WNS pre y post routing.
+
+El timing cerró en 0.00nS. Pre y post routing el WNS es el mismo, sin embargo el TNS post sintesis es de 0.82ns y el post-routing de 1.15ns.
+
+b) ¿Cuántos buffers insertó el CTS?
+
+Post sintesis había solo 1 buffer en el diseño. Luego del CTS se insertaron 60 buffers más, para dar un total de 61
+
+c) ¿Cuál es la longitud total de wire? ¿En qué capas están los wires más largos?
+
+La longitud total del wire (Net Lenght creo) $50685\mu\text{m}$
+
+d) ¿Hay DRC violations? Si hay, de qué tipo.
+
+Si, hay 5 violaciones. 
+
+e) ¿Cuál es la potencia total? ¿Qué porcentaje es dinámica vs leakage?
+
+La potencia total es 1.13mW. Siendo la potencia dinámica 0.162mW y la de leakage 0.331mW
+
+#### Paso 4: Análisis en la GUI
+
+Abrí FC con ``` make gui-syn ``` y explorá el layout del filtro:
+
+a) Identificá los registros del shift register (los 18 DFFs de delay).
+
+b) Identificá la cadena de multiplicadores/sumadores.
+
+c) Usá Highlight -> Clock Tree para ver el árbol de clock.
+
+d) Deshabilitá M3 y M4 en el panel de capas. ¿Qué ven?
