@@ -1,8 +1,8 @@
 `timescale 1ns/1ps
 
 module async_fifo #(
-    parameter int DEPTH = 4,
-    parameter int WIDTH = 8
+    parameter int WIDTH = 8,
+    parameter int ADDR  = 4
 ) (
     input  logic                 i_clk_r,
     input  logic                 i_clk_w,
@@ -16,15 +16,15 @@ module async_fifo #(
     output logic                 o_full
 );
 
-    localparam int ADDR_W = $clog2(DEPTH);
-    localparam int NB_PTR = ADDR_W + 1; //! Bit extra para detectar wrap
+    localparam int DEPTH = 1<<ADDR;
+    localparam int NB_PTR = ADDR + 1; //! Bit extra para detectar wrap
 
     //! Memoria de la FIFO
     logic [WIDTH - 1 : 0] mem [DEPTH - 1 : 0];
 
     //! Direcciones físicas de la memoria
-    logic [ADDR_W - 1 : 0] w_addr;
-    logic [ADDR_W - 1 : 0] r_addr;
+    logic [ADDR - 1 : 0] w_addr;
+    logic [ADDR - 1 : 0] r_addr;
 
     //! Punteros binarios extendidos
     logic [NB_PTR - 1 : 0] w_ptr;
@@ -49,15 +49,17 @@ module async_fifo #(
     logic r_pop;
 
     //! Escribir memoria
-    alwasys_ff @(posedege i_clk_w) begin : write_mem
-        mem[w_addr] <= i_data;
+    always_ff @(posedge i_clk_w) begin : write_mem
+        if (w_push) begin
+            mem[w_addr] <= i_data;
+        end
     end
 
     //! Leer memoria
-    alwasys_ff @(posedege i_clk_r) begin : read_mem
+    always_ff @(posedge i_clk_w) begin : read_mem
         if (i_rst_r) begin
             o_data <= '0;
-        end else if (i_r_en)
+        end else if (r_pop)
             o_data <= mem[r_addr];
     end
 
@@ -72,10 +74,10 @@ module async_fifo #(
 
     assign w_push = i_w_en && ~o_full;
     assign w_ptr_next = w_push ? w_ptr + 1'b1 : w_ptr;
-    assign w_addr = w_ptr[ADDR_W - 1 : 0]; //! Dirección sin el bit de wrap
+    assign w_addr = w_ptr[ADDR - 1 : 0]; //! Dirección sin el bit de wrap
 
     //! FIFO de lectura
-    always_ff @(posedge i_clk_r) begin : read_ptr
+    always_ff @(posedge i_clk_w) begin : read_ptr
         if (i_rst_r) begin
             r_ptr  <= '0;
         end else if (r_pop) begin
@@ -85,57 +87,45 @@ module async_fifo #(
 
     assign r_pop = i_r_en && ~o_empty;
     assign r_ptr_next = r_pop ? r_ptr + 1'b1 : r_ptr;
-    assign r_addr = r_ptr[ADDR_W - 1 : 0]; //! Dirección sin el bit de wrap
+    assign r_addr = r_ptr[ADDR - 1 : 0]; //! Dirección sin el bit de wrap
 
     //! Conversión a Gray
     //! Se usa Gray porque entre incrementos consecutivos cambia un solo bit.
-    //! Esto reduce el riesgo de metaestabilidad al cruzar punteros entre dominios de clock.
+    //! Esto reduce el riesgo de metaestabilidad al cruzar los punteros entre dominios de clock.
     assign w_ptr_gr = w_ptr ^ (w_ptr >> 1);
     assign r_ptr_gr = r_ptr ^ (r_ptr >> 1);
 
-    alwasys_ff @(posedege i_clk_r) begin : r_ptr_reg
+    always_ff @(posedge i_clk_w) begin : r_ptr_reg
         r_ptr_gr_reg <= r_ptr_gr;
     end
 
-    alwasys_ff @(posedege i_clk_w) begin : w_ptr_reg
+    always_ff @(posedge i_clk_w) begin : w_ptr_reg
         w_ptr_gr_reg <= w_ptr_gr;
     end
     
     //! sync_w_ptr_gr:
     //!     w_ptr_gr debe sincronizarse desde i_clk_w hacia i_clk_r.
-    genvar i;
-    generate
-        for(i = 0; i<NB_PTR; i++) begin
-            sync #(
-                .PIPE(3)
-            ) u_sync_r_ptr (
-                .i_clk_a(i_clk_w)
-                .i_clk_b(i_clk_r)
-                .i_rst_a(i_rst_w)
-                .i_rst_b(i_rst_r)
-                .i_data(w_ptr_gr_reg[i])
-                .o_data(sync_w_ptr_gr[i])
-            )
-        end
-    endgenerate
+    sync_bus #(
+        .NB_DATA (NB_PTR),
+        .PIPE    (3)
+    ) u_sync_w_ptr (
+        .i_clk  (i_clk_r),
+        .i_rst  (i_rst_r),
+        .i_data (w_ptr_gr_reg),
+        .o_data (sync_w_ptr_gr)
+    );
 
     //! sync_r_ptr_gr:
     //!     r_ptr_gr debe sincronizarse desde i_clk_r hacia i_clk_w.
-    genvar i;
-    generate
-        for(i = 0; i<NB_PTR; i++) begin
-            sync #(
-                .PIPE(3)
-            ) u_sync_w_ptr (
-                .i_clk_a(i_clk_r)
-                .i_clk_b(i_clk_w)
-                .i_rst_a(i_rst_r)
-                .i_rst_b(i_rst_w)
-                .i_data(r_ptr_gr_reg[i])
-                .o_data(sync_r_ptr_gr[i])
-            )
-        end
-    endgenerate
+    sync_bus #(
+        .NB_DATA (NB_PTR),
+        .PIPE    (3)
+    ) u_sync_r_ptr (
+        .i_clk  (i_clk_w),
+        .i_rst  (i_rst_w),
+        .i_data (r_ptr_gr_reg),
+        .o_data (sync_r_ptr_gr)
+    );
 
     //! Condicion Empty
     //! La FIFO está vacía cuando el puntero de lectura alcanza al puntero de escritura sincronizado al dominio de lectura.

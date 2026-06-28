@@ -156,12 +156,12 @@ Se hizo sintesis a 500MHz
 
 | Métrica                     | Post-Sintesis  | Post-Placement  | Post-Routing |
 |----------------------------:|---------------:|:---------------:|-------------:|
-| WNS (ns)                    | +0.01nS        | +0.00ns         | -0.01ns      |
-| TNS (ns)                    | -1.79ns        | -1.94ns         | -1.98        |
-| Area ($\mu\text{m}$^2)      | 3034           | 3343            | 3315         |
-| %LVT                        | 55             |                 |              |
-| #Celdas                     | 857            | 900             | 903          |
-| Potencia Dinámica ($\mu W$) | 54.3           | 69.1            | 72.0         |
+| WNS (ns)                    | +0.01nS        | +0.00ns         | -0.02ns      |
+| TNS (ns)                    | -1.79ns        | -1.80ns         | -1.92        |
+| Area ($\mu\text{m}$^2)      | 3034           | 3234            | 3371         |
+| %LVT                        | 55             | 53              | 38%          |
+| #Celdas                     | 857            | 900             | 993          |
+| Potencia Dinámica ($\mu W$) | 54.3           | 79.0            | 90.0         |
 
 a) ¿El WNS empeoró entre síntesis y routing? ¿Cuánto?
 
@@ -172,7 +172,7 @@ b) ¿El área cambió entre síntesis y routing? ¿Por qué?
 Sí, el área cambió. En síntesis se reporta una estimación basada en las celdas lógicas utilizadas. Durante implementación física pueden insertarse buffers o cambiar el tipo de celdas para cumplir timing, aumentando el área efectiva.
 
 c) ¿El % de LVT cambió? Si aumentó post-routing, ¿por qué?
-
+El % de LVT disminuyó. Esto puede ser porque la herramienta haya hecho optimizaciones para reducir el leakage power, al tener algo de margen en el timing.
 
 ### 9.6 Ejercicio Integrador: Filtro FIR de 19 taps - Flujo completo
 
@@ -192,7 +192,7 @@ El diseño tiene 923 celdas
 
 b) ¿Cuántos flip-flops? (en el reporte de área, buscá DFFX)
 
-El diseño tiene 109 FF
+El diseño tiene 159 FF
 
 c) ¿Cuál es el slack? ¿Qué frecuencia máxima soporta?
 
