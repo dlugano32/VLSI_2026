@@ -29,3 +29,5 @@ module sync_low
   end
 
   assign o_req = ((r_req_b[0]) & (~r_req_b[1]));
+  
+endmodule
