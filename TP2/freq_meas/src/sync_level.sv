@@ -1,12 +1,12 @@
 `timescale 1ns/1ps
 
-module sync #(
+module sync_level #(
     parameter int PIPE = 2
 ) (
     output logic o_data,
 
     input  logic i_data,
-    input  logic i_rst,
+    input  logic i_rst_n,
     input  logic i_clk
 );
 
@@ -15,7 +15,7 @@ module sync #(
 
     //! Synchronize the input level into the destination clock domain
     always_ff @(posedge i_clk) begin
-        if (i_rst) begin
+        if (~i_rst_n) begin
             pipe_r <= '0;
         end else begin
             pipe_r[0] <= i_data;
