@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
 
-module fall_detector #  (
+module fall_detector (
     input logic i_clk,
     input logic i_rst_n,
     input logic i_signal,
