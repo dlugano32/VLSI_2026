@@ -7,19 +7,9 @@
 //! clock domain to a slower clock domain.
 //!
 //! This module transfers request events from clock domain `i_clk_a` to clock
-//! domain `i_clk_b` using a toggle-based synchronization scheme.
-//!
-//! @details
-//! - The source clock domain is `i_clk_a`.
-//! - The destination clock domain is `i_clk_b`.
-//! - A pulse on `i_req` toggles an internal register in the source domain.
-//! - The toggle signal is passed through a synchronization pipeline clocked by
-//!   `i_clk_b`.
-//! - A request pulse is generated in the destination domain by detecting a
-//!   transition between the last two synchronization stages.
-//! - The synchronization pipeline depth is configurable through `PIPE`.
-//! - Increasing `PIPE` adds destination-clock flip-flop stages, which reduces
-//!   the probability that metastability propagates to the output logic.
+//! domain `i_clk_b` using a toggle-based synchronization scheme. The request
+//! will be seen in the slower clock domain as a pulse given the xor at the
+//! output.
 //!
 //! @note
 //! Since this module transfers events using a toggle, two or more request
@@ -29,14 +19,6 @@
 //!
 //! @param PIPE  Number of synchronization pipeline stages in the destination
 //!              clock domain. Must be at least 2.
-//!
-//! @input  i_clk_a  Source clock.
-//! @input  i_clk_b  Destination clock.
-//! @input  i_rst_a  Synchronous reset for the source clock domain.
-//! @input  i_rst_b  Synchronous reset for the destination clock domain.
-//! @input  i_req    Request pulse in the source clock domain.
-//!
-//! @output o_req    Request pulse synchronized to the destination clock domain.
 
 `timescale 1ns/1ps
 
