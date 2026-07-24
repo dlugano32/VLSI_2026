@@ -1,26 +1,25 @@
-`timescale 1ns/1ps
+`timescale 1ps/1ps
 
 //! @title Frequency Meter - Testbench
-//! @file tb_freq_meas.sv
+//! @file tb_freq_meter.sv
 //! @author dlugano
 //! @date 20/07/2026
 
-module tb_freq_meas ();
+module tb_freq_meter ();
 
     //! Testbench parameters
-    parameter int WIN_W = 12;
-    parameter int CNT_W = 14;
+    parameter int WIN_W = 19;
+    parameter int CNT_W = 20;
 
     //! Measurement window in reference-clock cycles
-    parameter int WINDOW_LEN = 1_000;
+    parameter int WINDOW_LEN = 266_667;
 
     //! Clock periods
     parameter time CLK_REF_PERIOD = 5_000ps; //! 200 MHz
     parameter time CLK_IN_PERIOD  = 1_334ps; //! Approximately 749.6 MHz
 
     //! Expected count
-    parameter int EXPECTED_COUNT =
-        (WINDOW_LEN * CLK_REF_PERIOD) / CLK_IN_PERIOD;
+    parameter int EXPECTED_COUNT = (WINDOW_LEN * CLK_REF_PERIOD) / CLK_IN_PERIOD;
 
     //! CDC uncertainty tolerance
     parameter int COUNT_TOLERANCE = 4;
@@ -41,10 +40,10 @@ module tb_freq_meas ();
     logic [CNT_W - 1 : 0] stored_count;
 
     //! Instance of frequency meter
-    freq_meas #(
+    freq_meter #(
         .WIN_W (WIN_W),
         .CNT_W (CNT_W)
-    ) u_freq_meas (
+    ) u_freq_meter (
         .o_count      (o_count),
         .o_done       (o_done),
         .i_window_len (i_window_len),
@@ -63,8 +62,8 @@ module tb_freq_meas ();
 
     //! Waveform generation
     initial begin
-        $dumpfile("sim/waves/freq_meas.vcd");
-        $dumpvars(0, tb_freq_meas);
+        $dumpfile("sim/waves/freq_meter.vcd");
+        $dumpvars(0, tb_freq_meter);
     end
 
     //! Test sequence
@@ -88,6 +87,8 @@ module tb_freq_meas ();
         //! Wait for the result-valid pulse
         wait (o_done == 1'b1);
 
+        $display("Done check");
+
         //! Store the measured result
         measured_count = int'(o_count);
         stored_count   = o_count;
@@ -110,11 +111,7 @@ module tb_freq_meas ();
         if (count_error <= COUNT_TOLERANCE) begin
             $display("PASS: Frequency count is within tolerance.");
         end else begin
-            $error(
-                "FAIL: Expected approximately %0d counts, obtained %0d.",
-                EXPECTED_COUNT,
-                measured_count
-            );
+            $error("FAIL: Expected approximately %0d counts, obtained %0d.", EXPECTED_COUNT, measured_count);
         end
 
         //! Verify that o_done is deasserted on the following reference cycle

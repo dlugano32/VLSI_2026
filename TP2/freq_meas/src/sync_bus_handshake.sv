@@ -95,16 +95,18 @@ module sync_bus_handshake #(
             ack_dst_r   <= 1'b0;
             dst_valid_r <= 1'b0;
         end else begin
-            //! Idle state: No transfer requested. Valid signal is deasserted.
-            dst_valid_r <= 1'b0;
+            //! o_dst_valid is a one-cycle pulse
+            dst_valid_r <= w_dst_en;
 
-            //! Source requested a transfer, so we can latch the data and assert the acknowledge
+            //! Capture a new word when the synchronized request rises
             if (w_dst_en) begin
-                data_dst_r  <= i_src_data;
-                ack_dst_r   <= 1'b1;
-                dst_valid_r <= 1'b1;
+                data_dst_r <= i_src_data;
+            end
+
+            //! Keep acknowledge asserted while the request remains active
+            if (w_dst_en) begin
+                ack_dst_r <= 1'b1;
             end else if (!req_dst) begin
-                //! Source retired the request, so we can deassert the acknowledge
                 ack_dst_r <= 1'b0;
             end
         end
