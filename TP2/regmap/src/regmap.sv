@@ -104,32 +104,38 @@ module regmap # (
     logic  du_arm_r;
     logic  du_rearm_r;
     logic [NB_SAMPLE - 1 : 0] du_threshold_r;
+    logic                     du_status_r;
     logic [DU_W_ADDR - 1 : 0] du_rdaddr_r;
     
     // Clkl Meas
     logic [WIN_W - 1 : 0] clkmeas_window_r;
+    logic                 clkmeas_status_r;
 
     // General purpose flags
     logic [15 : 0] ctrl_flags_r;
 
+    genvar i;
 
     //! Logica secuencial del regmap
     always_ff @(posedge clk) begin
         if(!rst_n) begin
-            ack_r   <= 1'b0;
+            ack_r   <= '0;
             rdata_r <= '0;
 
             // Inicialización de registros
-            prbs_enable_r    <= 1'b0;
+            prbs_enable_r    <= '0;
             prbs_order_sel_r <= '0;
-            prbs_seed_r      <= 15'b1;
+            prbs_seed_r      <= '1;
 
-            du_arm_r       <= 1'b0;
-            du_rearm_r     <= 1'b0;
-            du_threshold_r <= '0;
-            du_rdaddr_r    <= '0;
+            du_arm_r         <= '0;
+            du_rearm_r       <= '0;
+            du_threshold_r   <= '0;
+            du_status_r      <= '0;
+            du_rdaddr_r      <= '0;
 
             clkmeas_window_r <= '0;
+            clkmeas_status_r <= '0;
+
             ctrl_flags_r     <= '0;
 
             for (i = 0; i < (N_TAPS + 1) / 2; i++) begin
@@ -140,6 +146,19 @@ module regmap # (
             ack_r   <= req; // Ack sigue a req un ciclo de clk despues
 
             du_rearm_r <= 1'b0; // Pulse
+
+            if (i_clkmeas_status) begin // Sticky bit
+                clkmeas_status_r <= 1'b1;
+            end else if (req && !is_write && addr == ADDR_CLKMEAS_STATUS) begin
+                clkmeas_status_r <= 1'b0;
+            end
+
+            if (i_du_status) begin // Sticky bit
+                du_status_r <= 1'b1;
+            end else if (req && !is_write && addr == ADDR_DU_STATUS) begin
+                du_status_r <= 1'b0;
+            end
+            
             
             if(req) begin
                 if(is_write) begin  // Write registers
@@ -213,6 +232,10 @@ module regmap # (
                         ADDR_CTRL_FLAG: begin
                             ctrl_flags_r <= wdata[15 : 0];
                         end
+
+                        default: begin
+                            // Invalid or RO address: ignore write.
+                        end
                     endcase
                 end else begin // Read registers
                     rdata_r <= rdata_next;
@@ -238,70 +261,70 @@ module regmap # (
 
             ADDR_FIR_TAP_0: begin
                 rdata_next = {
-                    {(W_DATA - NB_COEFF){fir_taps_r[NB_COEFF - 1]}},
+                    {(W_DATA - NB_COEFF){fir_taps_r[0][NB_COEFF - 1]}},
                     fir_taps_r[0]
                 };
             end
 
             ADDR_FIR_TAP_1: begin
                 rdata_next = {
-                    {(W_DATA - NB_COEFF){fir_taps_r[NB_COEFF - 1]}},
+                    {(W_DATA - NB_COEFF){fir_taps_r[1][NB_COEFF - 1]}},
                     fir_taps_r[1]
                 };            
             end
 
             ADDR_FIR_TAP_2: begin
                 rdata_next = {
-                    {(W_DATA - NB_COEFF){fir_taps_r[NB_COEFF - 1]}},
+                    {(W_DATA - NB_COEFF){fir_taps_r[2][NB_COEFF - 1]}},
                     fir_taps_r[2]
                 };
             end
 
             ADDR_FIR_TAP_3: begin
                 rdata_next = {
-                    {(W_DATA - NB_COEFF){fir_taps_r[NB_COEFF - 1]}},
+                    {(W_DATA - NB_COEFF){fir_taps_r[3][NB_COEFF - 1]}},
                     fir_taps_r[3]
                 };
             end
 
             ADDR_FIR_TAP_4: begin
                 rdata_next = {
-                    {(W_DATA - NB_COEFF){fir_taps_r[NB_COEFF - 1]}},
+                    {(W_DATA - NB_COEFF){fir_taps_r[4][NB_COEFF - 1]}},
                     fir_taps_r[4]
                 };
             end
 
             ADDR_FIR_TAP_5: begin
                 rdata_next = {
-                    {(W_DATA - NB_COEFF){fir_taps_r[NB_COEFF - 1]}},
+                    {(W_DATA - NB_COEFF){fir_taps_r[5][NB_COEFF - 1]}},
                     fir_taps_r[5]
                 };
             end
 
             ADDR_FIR_TAP_6: begin
                 rdata_next = {
-                    {(W_DATA - NB_COEFF){fir_taps_r[NB_COEFF - 1]}},
+                    {(W_DATA - NB_COEFF){fir_taps_r[6][NB_COEFF - 1]}},
                     fir_taps_r[6]
                 };
             end
 
             ADDR_FIR_TAP_7: begin
                 rdata_next = {
-                    {(W_DATA - NB_COEFF){fir_taps_r[NB_COEFF - 1]}},
+                    {(W_DATA - NB_COEFF){fir_taps_r[7][NB_COEFF - 1]}},
                     fir_taps_r[7]
                 };
             end
 
             ADDR_FIR_TAP_8: begin
                 rdata_next = {
-                    {(W_DATA - NB_COEFF){fir_taps_r[NB_COEFF - 1]}},
+                    {(W_DATA - NB_COEFF){fir_taps_r[8][NB_COEFF - 1]}},
                     fir_taps_r[8]
                 };
             end
 
             ADDR_FIR_TAP_9: begin
                 rdata_next = {
-                    {(W_DATA - NB_COEFF){fir_taps_r[NB_COEFF - 1]}},
+                    {(W_DATA - NB_COEFF){fir_taps_r[9][NB_COEFF - 1]}},
                     fir_taps_r[9]
                 };
             end
@@ -316,7 +339,7 @@ module regmap # (
             end
 
             ADDR_DU_STATUS: begin
-                rdata_next[0] = i_du_status;
+                rdata_next[0] = du_status_r;
             end
 
             ADDR_DU_RDADDR: begin
@@ -336,7 +359,7 @@ module regmap # (
             end
 
             ADDR_CLKMEAS_STATUS: begin
-                rdata_next[0] = i_clkmeas_status;
+                rdata_next[0] = clkmeas_status_r;
             end
 
             ADDR_CTRL_FLAG: begin
