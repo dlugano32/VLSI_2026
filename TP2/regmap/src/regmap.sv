@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 module regmap # ( 
     //! Bus
     parameter int W_ADDR = 8,
@@ -7,7 +9,7 @@ module regmap # (
     parameter int NB_COEFF = 12,
     parameter int N_TAPS = 19,
 
-    //!DU (TODO: Revisar valores)
+    //!DU (TODO: Revisar valores de la DU)
     parameter int NB_SAMPLE = 8,
     parameter int DU_W_ADDR = 8,
 
@@ -100,7 +102,7 @@ module regmap # (
     // FIR
     logic signed [NB_COEFF - 1 : 0] fir_taps_r [(N_TAPS+1)/2 - 1 : 0];
 
-    // DU 
+    // DU (TODO: revisar)
     logic  du_arm_r;
     logic  du_rearm_r;
     logic [NB_SAMPLE - 1 : 0] du_threshold_r;
@@ -114,7 +116,6 @@ module regmap # (
     // General purpose flags
     logic [15 : 0] ctrl_flags_r;
 
-    genvar i;
 
     //! Logica secuencial del regmap
     always_ff @(posedge clk) begin
@@ -127,6 +128,9 @@ module regmap # (
             prbs_order_sel_r <= '0;
             prbs_seed_r      <= '1;
 
+            for(integer i = 0; i< (N_TAPS+1)/2; i++)
+                fir_taps_r[i] <= '0;
+
             du_arm_r         <= '0;
             du_rearm_r       <= '0;
             du_threshold_r   <= '0;
@@ -137,11 +141,6 @@ module regmap # (
             clkmeas_status_r <= '0;
 
             ctrl_flags_r     <= '0;
-
-            for (i = 0; i < (N_TAPS + 1) / 2; i++) begin
-                fir_taps_r[i] <= '0;
-            end
-
         end else begin
             ack_r   <= req; // Ack sigue a req un ciclo de clk despues
 
@@ -355,7 +354,7 @@ module regmap # (
             end
 
             ADDR_CLKMEAS_COUNT: begin
-                rdata_next [CNT_W - 1 : 0] = i_clkmeas_count;
+                rdata_next [CNT_W - 1 : 0] = i_clkmeas_count; // (TODO: Pasan directo?)
             end
 
             ADDR_CLKMEAS_STATUS: begin
