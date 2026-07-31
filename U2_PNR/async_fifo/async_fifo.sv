@@ -56,7 +56,7 @@ module async_fifo #(
     end
 
     //! Leer memoria
-    always_ff @(posedge i_clk_w) begin : read_mem
+    always_ff @(posedge i_clk_r) begin : read_mem
         if (i_rst_r) begin
             o_data <= '0;
         end else if (r_pop)
@@ -77,7 +77,7 @@ module async_fifo #(
     assign w_addr = w_ptr[ADDR - 1 : 0]; //! Dirección sin el bit de wrap
 
     //! FIFO de lectura
-    always_ff @(posedge i_clk_w) begin : read_ptr
+    always_ff @(posedge i_clk_r) begin : read_ptr
         if (i_rst_r) begin
             r_ptr  <= '0;
         end else if (r_pop) begin
@@ -95,12 +95,20 @@ module async_fifo #(
     assign w_ptr_gr = w_ptr ^ (w_ptr >> 1);
     assign r_ptr_gr = r_ptr ^ (r_ptr >> 1);
 
-    always_ff @(posedge i_clk_w) begin : r_ptr_reg
-        r_ptr_gr_reg <= r_ptr_gr;
+    always_ff @(posedge i_clk_r) begin : r_ptr_reg
+        if(i_rst_r) begin
+            r_ptr_gr_reg <= '0;
+        end else begin
+            r_ptr_gr_reg <= r_ptr_gr;
+        end
     end
 
     always_ff @(posedge i_clk_w) begin : w_ptr_reg
-        w_ptr_gr_reg <= w_ptr_gr;
+        if(i_rst_w) begin
+            w_ptr_gr_reg <= '0;
+        end else begin
+            w_ptr_gr_reg <= w_ptr_gr;
+        end
     end
     
     //! sync_w_ptr_gr:
