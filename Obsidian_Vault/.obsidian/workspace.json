@@ -11,10 +11,14 @@
             "id": "627530f949a8c476",
             "type": "leaf",
             "state": {
-              "type": "empty",
-              "state": {},
+              "type": "markdown",
+              "state": {
+                "file": "Clase 13-6.md",
+                "mode": "source",
+                "source": false
+              },
               "icon": "lucide-file",
-              "title": "New tab"
+              "title": "Clase 13-6"
             }
           }
         ]
@@ -181,10 +185,10 @@
   },
   "active": "627530f949a8c476",
   "lastOpenFiles": [
+    "Clase 20-5.md",
     "Clase 13-6.md",
     "Clase 11-5.md",
     "Sistemas de comunicación Digitales.md",
-    "Clase 20-5.md",
     "Untitled.canvas",
     "Pasted image images.md",
     "images",
