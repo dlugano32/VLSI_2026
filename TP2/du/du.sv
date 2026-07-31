@@ -5,7 +5,7 @@ module du #(
     parameter  int DEPTH  = 1024, //! Debe ser siempre potencia de dos
     localparam int ADDR_W = $clog2(DEPTH)
 ) (
-    input  logic                   i_arm, // Pulse
+    input  logic                   i_arm, // Pulse synced from CPU
     input  logic                   i_trigger,
     input  logic [          1 : 0] i_mode,
     input  logic [WIDTH   - 1 : 0] i_data,
@@ -39,7 +39,7 @@ module du #(
     always_ff @(posedge i_clk) begin
         if(!i_rst_n) begin
             mode_r <= MID;
-        end else if(i_arm) begin
+        end else if(i_arm) begin    //! Dado que el modo proviene del regmap, desde otro dominio de clock. Primero se deja estable el modo y luego se da la señal de arm
             case(i_mode)
                 PRE, MID, POST : mode_r <= i_mode;
                 default : mode_r <= MID; //! En caso de que la entrada tome un valor prohibido
@@ -146,6 +146,10 @@ module du #(
     end
 
     //! Read Mem
+    //! TODO: Entiendo que se puede hacer de forma combinacional porque el dato va a estar estable
+    //! Sin embargo me surge la duda si en terminos de recursos lo que infiere, que sería
+    //! un banco de registros y un mux grande, para la lectura es mas o menos eficiente que una 
+    //! lectura como si fuera una bram sincrónica
     always_comb begin
         if(state_r == DONE)
             o_data = mem[i_add_rd];
@@ -154,6 +158,6 @@ module du #(
     end
     
     assign o_ptr = ptr_wr;
-    assign o_done = (state_r == DONE);
+    assign o_done = (state_r == DONE); //! Synced to CPU
 
 endmodule;
