@@ -2,7 +2,7 @@
 
 module du #(
     parameter  int WIDTH  = 12,
-    parameter  int DEPTH  = 1024,
+    parameter  int DEPTH  = 1024, //! Debe ser siempre potencia de dos
     localparam int ADDR_W = $clog2(DEPTH)
 ) (
     input  logic                   i_arm, // Pulse
@@ -13,7 +13,6 @@ module du #(
     input  logic                   i_rst_n,
 
     input  logic [ADDR_W  - 1 : 0] i_add_rd,
-    input  logic                   i_req_rd, 
 
     output logic [WIDTH  - 1 : 0]  o_data,
     output logic [ADDR_W - 1 : 0]  o_ptr,
@@ -21,7 +20,6 @@ module du #(
 );
 
     logic [WIDTH  - 1 : 0] mem [DEPTH - 1 : 0];
-    logic [WIDTH  - 1 : 0] data_rd;
     logic [ADDR_W - 1 : 0] ptr_wr;
     
     logic [ADDR_W - 1 : 0] target;
@@ -68,9 +66,6 @@ module du #(
                 end
             end
             
-            //! TODO: Condición de trigger: trigger_in en alto 
-            // (comparador externo simple, ej. sample_out >= threshold, 
-            // con threshold programable desde el regmap) mientras arm=1.
             RUN: begin
                 if(i_trigger) begin
                     if(mode_r == PRE) begin
@@ -87,7 +82,6 @@ module du #(
                 end
             end
 
-            //! TODO: rearm (pulso desde el regmap) vuelve a poner capture_done=0 y habilita una nueva captura.
             DONE: begin
                 if(i_arm) begin
                     state_next = RUN;
@@ -119,7 +113,6 @@ module du #(
         endcase
     end
 
-    assign w_en = (state_r != IDLE && state_r != DONE);
     assign target = (mode_r == MID) ? ((DEPTH/2) - 1) : (DEPTH - 1);
     assign capture_done = (state_r == CAPTURING) && (post_tr_cnt_r == target);
 
@@ -153,14 +146,13 @@ module du #(
     end
 
     //! Read Mem
-    always_ff @(posedge i_clk) begin
-        if(!i_rst_n) begin
-            data_rd <= '0;
-        end else if((state_r == DONE) && i_req_rd)
-            data_rd <= mem[i_add_rd];
+    always_comb begin
+        if(state_r == DONE)
+            o_data = mem[i_add_rd];
+        else
+            o_data = '0;
     end
     
-    assign o_data = data_rd;
     assign o_ptr = ptr_wr;
     assign o_done = (state_r == DONE);
 
