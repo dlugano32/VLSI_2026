@@ -1,4 +1,4 @@
-`timescale 1ns/1ps
+`timescale 1ps/1ps
 
 module prbs_next_state #(
     parameter int MAX_ORDER

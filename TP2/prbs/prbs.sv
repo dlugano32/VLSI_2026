@@ -1,8 +1,8 @@
 `timescale 1ns/1ps
 
 //! @title Configurable PRBS Generator
-//! @file prbs_generator.sv
-//! @brief Generates one of two selectable PRBS sequences using a shared LFSR.
+//! @file prbs.sv
+//! @brief Generates one of six selectable PRBS sequences using a shared LFSR.
 
 module prbs # (
     parameter int MAX_ORDER = 15

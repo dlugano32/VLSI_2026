@@ -1,10 +1,11 @@
-`timescale 1ns/1ps
+`timescale 1ps/1ps
 
 //! @title Configurable PRBS Generator
-//! @file prbs_generator.sv
-//! @brief Generates one of two selectable PRBS sequences using a shared LFSR.
+//! @file prbs_parallel.sv
+//! @brief Generates one of six selectable PRBS sequences using a shared LFSR.
+//!        This PRBS generates P parallel outputs.
 
-module prbs_gen # (
+module prbs_parallel # (
     parameter int MAX_ORDER = 15,
     parameter int P = 4
 ) (
