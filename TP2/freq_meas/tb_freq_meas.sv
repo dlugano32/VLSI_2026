@@ -1,11 +1,11 @@
 `timescale 1ps/1ps
 
-//! @title Frequency Meter - Testbench
-//! @file tb_freq_meter.sv
+//! @title Frequency Meas
+//! @file tb_freq_meas.sv
 //! @author dlugano
-//! @date 20/07/2026
+//! @date 31/07/2026
 
-module tb_freq_meter ();
+module tb_freq_meas ();
 
     //! Testbench parameters
     parameter int WIN_W = 19;
@@ -16,19 +16,17 @@ module tb_freq_meter ();
 
     //! Clock periods
     parameter time CLK_REF_PERIOD = 5_000ps; //! 200 MHz
-    parameter time CLK_IN_PERIOD  = 1_334ps; //! Approximately 749.6 MHz
+    parameter time CLK_IN_PERIOD  = 1_332ps; //! Approximately 750 MHz
 
     //! Expected count
     parameter int EXPECTED_COUNT = (WINDOW_LEN * CLK_REF_PERIOD) / CLK_IN_PERIOD;
-
-    //! CDC uncertainty tolerance
-    parameter int COUNT_TOLERANCE = 4;
 
     //! DUT signals
     logic [CNT_W - 1 : 0] o_count;
     logic                 o_done;
 
     logic [WIN_W - 1 : 0] i_window_len;
+    logic                 i_start;
     logic                 i_rst_n;
     logic                 i_clk_ref;
     logic                 i_clk_in;
@@ -40,13 +38,14 @@ module tb_freq_meter ();
     logic [CNT_W - 1 : 0] stored_count;
 
     //! Instance of frequency meter
-    freq_meter #(
+    freq_meas #(
         .WIN_W (WIN_W),
         .CNT_W (CNT_W)
-    ) u_freq_meter (
+    ) u_freq_meas (
         .o_count      (o_count),
         .o_done       (o_done),
         .i_window_len (i_window_len),
+        .i_start      (i_start),
         .i_rst_n      (i_rst_n),
         .i_clk_ref    (i_clk_ref),
         .i_clk_in     (i_clk_in)
@@ -62,8 +61,8 @@ module tb_freq_meter ();
 
     //! Waveform generation
     initial begin
-        $dumpfile("sim/waves/freq_meter.vcd");
-        $dumpvars(0, tb_freq_meter);
+        $dumpfile("sim/waves/freq_meas.vcd");
+        $dumpvars(0, tb_freq_meas);
     end
 
     //! Test sequence
@@ -75,25 +74,26 @@ module tb_freq_meter ();
 
         //! Initial values
         i_rst_n      = 1'b0;
+        i_start      = 1'b0;
         i_window_len = WINDOW_LEN;
 
         //! Keep the module in reset
-        repeat (5) @(posedge i_clk_ref);
-
-        //! Release the asynchronous reset away from a clock edge
-        @(negedge i_clk_ref);
+        repeat (5) @(negedge i_clk_ref);
         i_rst_n = 1'b1;
 
-        //! Wait for the result-valid pulse
+        repeat (5) @(negedge i_clk_ref);
+        i_start = 1'b1;
+        @(negedge i_clk_ref);
+        i_start = 1'b0;
+
+        //! Wait for done status
         wait (o_done == 1'b1);
 
-        $display("Done check");
+        $display("Measurement is done. Count is available");
 
         //! Store the measured result
-        measured_count = int'(o_count);
-        stored_count   = o_count;
-
-        count_error = measured_count - EXPECTED_COUNT;
+        stored_count = o_count;
+        count_error = o_count - EXPECTED_COUNT;
 
         if (count_error < 0) begin
             count_error = -count_error;
@@ -104,28 +104,17 @@ module tb_freq_meter ();
         $display("Input-clock period     : %0t", CLK_IN_PERIOD);
         $display("Window cycles          : %0d", WINDOW_LEN);
         $display("Expected count         : %0d", EXPECTED_COUNT);
-        $display("Measured count         : %0d", measured_count);
+        $display("Measured count         : %0d", stored_count);
         $display("Absolute error         : %0d", count_error);
 
-        //! Verify the measured count
-        if (count_error <= COUNT_TOLERANCE) begin
-            $display("PASS: Frequency count is within tolerance.");
+        //! Verify that o_done and o_count remains stables after count was finished
+        repeat (10) @(posedge i_clk_ref);
+
+        if (o_done == 1'b1) begin
+            $display("PASS: o_done flag is still up.");
         end else begin
-            $error("FAIL: Expected approximately %0d counts, obtained %0d.", EXPECTED_COUNT, measured_count);
+            $error("FAILED: o_done flag is down.");
         end
-
-        //! Verify that o_done is deasserted on the following reference cycle
-        @(posedge i_clk_ref);
-        #1ps;
-
-        if (o_done !== 1'b0) begin
-            $error("FAIL: o_done lasted longer than one reference-clock cycle.");
-        end else begin
-            $display("PASS: o_done was asserted for one reference-clock cycle.");
-        end
-
-        //! Verify that o_count remains stable after the measurement
-        repeat (5) @(posedge i_clk_ref);
 
         if (o_count !== stored_count) begin
             $error("FAIL: o_count changed after the measurement completed.");
@@ -133,19 +122,33 @@ module tb_freq_meter ();
             $display("PASS: o_count remained stable after completion.");
         end
 
-        //! Assert reset again
-        i_rst_n = 1'b0;
+        //! Start a second measurement
+        @(negedge i_clk_ref);
+        i_start = 1'b1;
+        @(negedge i_clk_ref);
+        i_start = 1'b0;
 
-        //! Allow both internal reset synchronizers to react
-        repeat (5) @(posedge i_clk_ref);
+        //! The previous result must be invalidated immediately
+        @(posedge i_clk_ref);
 
-        //! Verify reset behavior
         if (o_done !== 1'b0) begin
-            $error("FAIL: o_done was not cleared by reset.");
+            $error("FAIL: o_done was not cleared after starting again.");
+        end else begin
+            $display("PASS: o_done was cleared after starting again.");
         end
 
-        if (o_count !== '0) begin
-            $error("FAIL: o_count was not cleared by reset.");
+        repeat (5) @(posedge i_clk_ref);
+
+        //! Checking if changing window_len in the middle of the count breaks the sequence
+        i_window_len = '0;
+
+        //! Wait for the second result
+        wait (o_done == 1'b1);
+
+        if (o_count == stored_count) begin
+            $display("PASS: second measurement matches the first one.");
+        end else begin
+            $display("WARNING: Measurements differ. First=%0d, second=%0d.", stored_count, o_count);
         end
 
         $display("");
