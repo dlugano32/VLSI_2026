@@ -12,7 +12,7 @@ module du #(
     input  logic                   i_clk,
     input  logic                   i_rst_n,
 
-    input  logic [ADDR_W  - 1 : 0] i_add_rd,
+    input  logic [ADDR_W  - 1 : 0] i_rdaddr,
 
     output logic [WIDTH  - 1 : 0]  o_data,
     output logic [ADDR_W - 1 : 0]  o_ptr,
@@ -152,12 +152,12 @@ module du #(
     //! lectura como si fuera una bram sincrónica
     always_comb begin
         if(state_r == DONE)
-            o_data = mem[i_add_rd];
+            o_data = mem[i_rdaddr];
         else
             o_data = '0;
     end
     
-    assign o_ptr = ptr_wr;
+    assign o_ptr =  (state_r == DONE) ? ptr_wr : '0;
     assign o_done = (state_r == DONE); //! Synced to CPU
 
 endmodule;
