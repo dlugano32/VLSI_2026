@@ -6,12 +6,12 @@ module regmap # (
     parameter int W_DATA = 32,
 
     //! Fir filter
-    parameter int NB_COEFF = 12,
-    parameter int N_TAPS = 19,
+    parameter  int NB_COEFF = 12,
+    localparam int N_TAPS = 19,
 
-    //!DU (TODO: Revisar valores de la DU)
-    parameter int NB_SAMPLE = 8,
-    parameter int DU_W_ADDR = 8,
+    //!DU
+    parameter int NB_SAMPLE = 12,
+    parameter int DU_W_ADDR = 10,
 
     //! Clock Measurement
     parameter int WIN_W = 19,
@@ -34,20 +34,22 @@ module regmap # (
     output logic [14 : 0] o_prbs_seed,
 
     //! Fir configuration
-    output logic signed [NB_COEFF - 1 : 0] o_fir_taps [(N_TAPS+1)/2 - 1 : 0],
+    output logic signed [NB_COEFF - 1 : 0] o_fir_taps [(N_TAPS+1)/2 - 1 : 0], // TODO modificarlo a packed
 
-    //! DU configuration
+    //! DU configuration //TODO modificar signedness
     output logic o_du_arm,
-    output logic o_du_rearm,
+    output logic [1 : 0] o_du_mode,
     output logic [NB_SAMPLE - 1 : 0] o_du_threshold,
     output logic [DU_W_ADDR - 1 : 0] o_du_rdaddr,
 
     //! DU status
     input  logic                     i_du_status,
     input  logic [NB_SAMPLE - 1 : 0] i_du_rddata,
+    input  logic [DU_W_ADDR - 1 : 0] i_du_rdptr,
     
     //! Clk Meas configuration
     output logic [WIN_W - 1 : 0] o_clkmeas_window,
+    output logic                 o_clkmeas_start,
     input  logic [CNT_W - 1 : 0] i_clkmeas_count,
     input  logic                 i_clkmeas_status,
 
@@ -78,11 +80,13 @@ module regmap # (
     localparam logic [W_ADDR - 1 : 0] ADDR_DU_STATUS      = 8'h22;
     localparam logic [W_ADDR - 1 : 0] ADDR_DU_RDADDR      = 8'h23;
     localparam logic [W_ADDR - 1 : 0] ADDR_DU_RDDATA      = 8'h24;
+    localparam logic [W_ADDR - 1 : 0] ADDR_DU_RDPTR       = 8'h25;
 
     // Clk Meas
-    localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_WINDOW = 8'h30;
-    localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_COUNT  = 8'h31;
-    localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_STATUS = 8'h32;
+    localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_CTRL   = 8'h30;
+    localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_WINDOW = 8'h31;
+    localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_COUNT  = 8'h32;
+    localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_STATUS = 8'h33;
 
     // General-purpose control flags
     localparam logic [W_ADDR - 1 : 0] ADDR_CTRL_FLAG      = 8'h40;
@@ -102,20 +106,20 @@ module regmap # (
     // FIR
     logic signed [NB_COEFF - 1 : 0] fir_taps_r [(N_TAPS+1)/2 - 1 : 0];
 
-    // DU (TODO: revisar)
-    logic  du_arm_r;
-    logic  du_rearm_r;
+    // DU
+    logic                     du_arm_r;
+    logic [1 : 0]             du_mode_r;
     logic [NB_SAMPLE - 1 : 0] du_threshold_r;
-    logic                     du_status_r;
+    logic                     du_status_r; //! Sticky flag
     logic [DU_W_ADDR - 1 : 0] du_rdaddr_r;
     
     // Clkl Meas
+    logic                 clkmeas_start_r;
     logic [WIN_W - 1 : 0] clkmeas_window_r;
-    logic                 clkmeas_status_r;
+    logic                 clkmeas_status_r; //! Sticky flag
 
     // General purpose flags
     logic [15 : 0] ctrl_flags_r;
-
 
     //! Logica secuencial del regmap
     always_ff @(posedge clk) begin
@@ -132,11 +136,12 @@ module regmap # (
                 fir_taps_r[i] <= '0;
 
             du_arm_r         <= '0;
-            du_rearm_r       <= '0;
+            du_mode_r        <= '0;
             du_threshold_r   <= '0;
             du_status_r      <= '0;
             du_rdaddr_r      <= '0;
 
+            clkmeas_start_r  <= '0;
             clkmeas_window_r <= '0;
             clkmeas_status_r <= '0;
 
@@ -144,7 +149,8 @@ module regmap # (
         end else begin
             ack_r   <= req; // Ack sigue a req un ciclo de clk despues
 
-            du_rearm_r <= 1'b0; // Pulse
+            du_arm_r <= 1'b0; // Pulse
+            clkmeas_start_r <= 1'b0; // Pulse
 
             if (i_clkmeas_status) begin // Sticky bit
                 clkmeas_status_r <= 1'b1;
@@ -213,7 +219,7 @@ module regmap # (
                         
                         ADDR_DU_CTRL: begin
                             du_arm_r   <= wdata[0];
-                            du_rearm_r <= wdata[1];
+                            du_mode_r  <= wdata[2:1];
                         end
 
                         ADDR_DU_THRESHOLD: begin
@@ -222,6 +228,10 @@ module regmap # (
 
                         ADDR_DU_RDADDR: begin
                             du_rdaddr_r <= wdata[DU_W_ADDR - 1 : 0];
+                        end
+
+                        ADDR_CLKMEAS_CTRL: begin
+                            clkmeas_start_r <= wdata[0];
                         end
 
                         ADDR_CLKMEAS_WINDOW: begin
@@ -329,8 +339,8 @@ module regmap # (
             end
 
             ADDR_DU_CTRL: begin
-                rdata_next[0] = du_arm_r;
-                rdata_next[1] = du_rearm_r;
+                rdata_next[0]   = 1'b0;     // Pulso (WO)
+                rdata_next[2:1] = du_mode_r;
             end
             
             ADDR_DU_THRESHOLD: begin
@@ -349,12 +359,21 @@ module regmap # (
                 rdata_next [NB_SAMPLE - 1 : 0] = i_du_rddata;
             end
 
+            ADDR_DU_RDPTR: begin
+                rdata_next[DU_W_ADDR - 1 : 0] = i_du_rdptr;
+            end
+            
+            // No tendría sentido leer un Pulso (WO)
+            //ADDR_CLKMEAS_CTRL: begin
+                //rdata_next[0] = clkmeas_start_r;
+            //end
+
             ADDR_CLKMEAS_WINDOW: begin
                 rdata_next [WIN_W - 1 : 0] = clkmeas_window_r;
             end
 
             ADDR_CLKMEAS_COUNT: begin
-                rdata_next [CNT_W - 1 : 0] = i_clkmeas_count; // (TODO: Pasan directo?)
+                rdata_next [CNT_W - 1 : 0] = i_clkmeas_count;
             end
 
             ADDR_CLKMEAS_STATUS: begin
@@ -380,9 +399,10 @@ module regmap # (
     assign o_prbs_seed      = prbs_seed_r;
     assign o_fir_taps       = fir_taps_r;
     assign o_du_arm         = du_arm_r;
-    assign o_du_rearm       = du_rearm_r;
-    assign o_du_threshold = du_threshold_r;
+    assign o_du_mode        = du_mode_r;
+    assign o_du_threshold   = du_threshold_r;
     assign o_du_rdaddr      = du_rdaddr_r;
     assign o_clkmeas_window = clkmeas_window_r;
+    assign o_clkmeas_start  = clkmeas_start_r;
     assign o_ctrl_flags     = ctrl_flags_r;
 endmodule
