@@ -55,6 +55,42 @@ def main() -> None:
         length=2**10,
     )
 
+    # PRBS11:
+    # P(x) = x^11 + x^9 + 1
+    prbs11 = generate_prbs(
+        order=11,
+        taps=(11, 9),
+        seed=0x7FF,
+        length=2**11,
+    )
+
+    # PRBS12:
+    # P(x) = x^12 + x^6 + x^4 + x + 1
+    prbs12 = generate_prbs(
+        order=12,
+        taps=(12, 6, 4, 1),
+        seed=0xFFF,
+        length=2**12,
+    )
+
+    # PRBS13:
+    # P(x) = x^13 + x^4 + x^3 + x + 1
+    prbs13 = generate_prbs(
+        order=13,
+        taps=(13, 4, 3, 1),
+        seed=0x1FFF,
+        length=2**12,
+    )
+
+    # PRBS14:
+    # P(x) = x^14 + x^5 + x^3 + x + 1
+    prbs14 = generate_prbs(
+        order=14,
+        taps=(14, 5, 3, 1),
+        seed=0x3FFF,
+        length=2**12,
+    )
+
     # PRBS15:
     # P(x) = x^15 + x^14 + 1
     prbs15 = generate_prbs(
@@ -64,8 +100,12 @@ def main() -> None:
         length=2**12,
     )
 
-    save_mem_file("TP2/prbs/mem/prbs10_reference.mem", prbs10)
-    save_mem_file("TP2/prbs/mem/prbs15_reference.mem", prbs15)
+    save_mem_file("TP2/prbs/tb/mem/prbs10_reference.mem", prbs10)
+    save_mem_file("TP2/prbs/tb/mem/prbs11_reference.mem", prbs11)
+    save_mem_file("TP2/prbs/tb/mem/prbs12_reference.mem", prbs12)
+    save_mem_file("TP2/prbs/tb/mem/prbs13_reference.mem", prbs13)
+    save_mem_file("TP2/prbs/tb/mem/prbs14_reference.mem", prbs14)
+    save_mem_file("TP2/prbs/tb/mem/prbs15_reference.mem", prbs15)
 
 if __name__ == "__main__":
     main()
