@@ -17,7 +17,7 @@ module tb_du ();
     localparam int DATA_ADDR_W = $clog2(N_DATA);
 
     //! Clock period
-    localparam time CLK_PERIOD = 4_000ps; //! 250 MHz
+    localparam time CLK_PERIOD = 4ns; //! 250 MHz
 
     //! DUT inputs
     logic                   i_arm;
@@ -26,7 +26,7 @@ module tb_du ();
     logic [WIDTH   - 1 : 0] data_r;
     logic                   clk;
     logic                   i_rst_n;
-    logic [ADDR_W -  1 : 0] i_add_rd;
+    logic [ADDR_W -  1 : 0] i_rdaddr;
 
     //! DUT outputs
     logic [WIDTH  - 1 : 0] o_data;
@@ -36,12 +36,15 @@ module tb_du ();
     //! Input-data memory
     logic [WIDTH       - 1 : 0] mem_data [N_DATA - 1 : 0];
     logic [DATA_ADDR_W - 1 : 0] ptr_rd;
-    logic [DATA_ADDR_W - 1 : 0] trigger_idx;
+    logic [DATA_ADDR_W - 1 : 0] data_idx_r;
+    logic [DATA_ADDR_W - 1 : 0] trigger_idx_r;
 
     //! Output-data memory
     logic [WIDTH  - 1 : 0] stored_data   [DEPTH - 1 : 0];
     
+    //! TB vars
     int match_count = 0;
+    int expected_idx = 0;
 
     //! Clock generator
     initial clk = 1'b0;
@@ -49,7 +52,7 @@ module tb_du ();
 
     //! Load the input samples
     initial begin
-        $readmemb("sim/tb/mem/data.mem", mem_data);
+        $readmemb("sim/tb/mem/prbs10_reference.mem", mem_data);
     end
 
     //! Generate one input sample per clock cycle
@@ -58,14 +61,20 @@ module tb_du ();
         if (!i_rst_n) begin
             data_r <= '0;
             ptr_rd <= '0;
-            trigger_idx <= '0;
+            data_idx_r <= '0;
         end else begin
             data_r <= mem_data[ptr_rd];
             ptr_rd <= ptr_rd + 1'b1;
-
-            if(i_trigger)   // Tener en cuenta posible condición de carrera
-                trigger_idx <= ptr_rd;
-
+            data_idx_r <= ptr_rd;
+        end
+    end
+    
+    //! Saves the index of the input array to the DU when the trigger is active
+    always @(posedge clk) begin
+        if (!i_rst_n) begin
+            trigger_idx_r <= '0;
+        end else if (i_trigger) begin
+            trigger_idx_r <= data_idx_r;
         end
     end
 
@@ -80,7 +89,7 @@ module tb_du ();
         .i_data    (data_r),
         .i_clk     (clk),
         .i_rst_n   (i_rst_n),
-        .i_add_rd  (i_add_rd),
+        .i_rdaddr  (i_rdaddr),
 
         .o_data    (o_data),
         .o_ptr     (o_ptr),
@@ -106,7 +115,7 @@ module tb_du ();
         i_arm     = 1'b0;
         i_trigger = 1'b0;
         i_mode    = 2'b00;
-        i_add_rd  = '0;
+        i_rdaddr  = '0;
 
         //! Keep the DUT in reset
         repeat (5) @(negedge clk);
@@ -127,7 +136,7 @@ module tb_du ();
 
         //! Allow the circular buffer to wrap before applying the trigger
         repeat (64) @(negedge clk);
-
+        
         //! Generate a one-cycle trigger pulse
         i_trigger = 1'b1;
 
@@ -138,29 +147,40 @@ module tb_du ();
         wait (o_done);
 
         //! When the circular buffer is full, o_ptr points to the oldest stored sample.
-        i_add_rd = o_ptr;
+        i_rdaddr = o_ptr;
 
         $display("");
         $display("DU finished capturing the signal.");
-        $display("Oldest sample address: %0d", o_ptr);
+        $display("Oldest sample address: o_ptr = %0d", o_ptr);
+
+        $display("");
         $display("Captured samples:");
+        $display("");
 
         //! Read the complete circular buffer in chronological order
         for (int i = 0; i < DEPTH; i++) begin
             //! Allow the combinational memory output to settle
             @(negedge clk);
             stored_data[i] = o_data;
-            $display("sample[%0d] | mem[%0d] = %0d", i, i_add_rd, o_data);
+            $display("sample[%0d] | du_mem[%0d] = %0d", i, i_rdaddr, o_data);
 
-            i_add_rd = i_add_rd + 1'b1;
+            i_rdaddr = i_rdaddr + 1'b1;
         end
+
+        $display("");
+        $display("Captured autocheking with known signal:");
+        $display("");
 
         //! Check wether the stored_data relates to the input data in the triggered moment
         for (int i = 0; i < DEPTH; i++) begin
-            expected_idx = int'(trigger_sample_idx) - (DEPTH / 2) + i;
+            expected_idx = int'(trigger_idx_r) - (DEPTH / 2) + i;
+
+
 
             if (stored_data[i] == mem_data[expected_idx])
                 match_count++;
+
+            $display("Sample %0d: expected mem_data[%0d]=%0d, got=%0d", i, expected_idx, mem_data[expected_idx], stored_data[i]);
         end
 
         $display(""); 

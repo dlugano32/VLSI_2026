@@ -41,7 +41,7 @@ module du #(
             mode_r <= MID;
         end else if(i_arm) begin    //! Dado que el modo proviene del regmap, desde otro dominio de clock. Primero se deja estable el modo y luego se da la señal de arm
             case(i_mode)
-                PRE, MID, POST : mode_r <= i_mode;
+                PRE, MID, POST : mode_r <= mode_e'(i_mode);
                 default : mode_r <= MID; //! En caso de que la entrada tome un valor prohibido
             endcase
         end
