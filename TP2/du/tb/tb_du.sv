@@ -64,7 +64,7 @@ module tb_du ();
             data_idx_r <= '0;
         end else begin
             data_r <= mem_data[ptr_rd];
-            ptr_rd <= ptr_rd + 1'b1;
+            ptr_rd <= ptr_rd + 1'b1;    // Wrap around counter
             data_idx_r <= ptr_rd;
         end
     end
@@ -123,9 +123,14 @@ module tb_du ();
         //! Release reset away from the DUT active clock edge
         i_rst_n = 1'b1;
 
-        //! ================================================================
-        //! Test 1: MID mode
-        //! ================================================================
+        $display("");
+        $display("================================================================");
+        $display("Test 1: MID mode");
+        $display("================================================================");
+        $display("");
+
+        match_count = 0;
+        expected_idx = 0;
 
         //! Arm the DU and store the selected mode
         i_mode = 2'b01;
@@ -153,23 +158,23 @@ module tb_du ();
         $display("DU finished capturing the signal.");
         $display("Oldest sample address: o_ptr = %0d", o_ptr);
 
-        $display("");
-        $display("Captured samples:");
-        $display("");
+        //$display("");
+        //$display("Captured samples:");
+        //$display("");
 
         //! Read the complete circular buffer in chronological order
         for (int i = 0; i < DEPTH; i++) begin
             //! Allow the combinational memory output to settle
             @(negedge clk);
             stored_data[i] = o_data;
-            $display("sample[%0d] | du_mem[%0d] = %0d", i, i_rdaddr, o_data);
+            //$display("sample[%0d] | du_mem[%0d] = %0d", i, i_rdaddr, o_data);
 
             i_rdaddr = i_rdaddr + 1'b1;
         end
 
-        $display("");
-        $display("Captured autocheking with known signal:");
-        $display("");
+        //$display("");
+        //$display("Captured autocheking with known signal:");
+        //$display("");
 
         //! Check wether the stored_data relates to the input data in the triggered moment
         for (int i = 0; i < DEPTH; i++) begin
@@ -180,12 +185,148 @@ module tb_du ();
             if (stored_data[i] == mem_data[expected_idx])
                 match_count++;
 
-            $display("Sample %0d: expected mem_data[%0d]=%0d, got=%0d", i, expected_idx, mem_data[expected_idx], stored_data[i]);
+            //$display("Sample %0d: expected mem_data[%0d]=%0d, got=%0d", i, expected_idx, mem_data[expected_idx], stored_data[i]);
         end
 
-        $display(""); 
+        $display("");
         $display("Matched samples : %0d/%0d", match_count, DEPTH); 
-        $display(""); 
+        $display("");
+
+
+        $display("");
+        $display("================================================================");
+        $display("Test 2: PRE mode");
+        $display("================================================================");
+        $display("");
+
+        match_count = 0;
+        expected_idx = 0;
+
+        //! Arm the DU and store the selected mode
+        i_mode = 2'b00;
+        i_arm  = 1'b1;
+
+        @(negedge clk);
+        i_arm = 1'b0;
+
+        //! Allow the circular buffer to wrap before applying the trigger
+        repeat (64) @(negedge clk);
+        
+        //! Generate a one-cycle trigger pulse
+        i_trigger = 1'b1;
+
+        @(negedge clk);
+        i_trigger = 1'b0;
+
+        //! Wait until the post-trigger capture is complete
+        wait (o_done);
+
+        //! When the circular buffer is full, o_ptr points to the oldest stored sample.
+        i_rdaddr = o_ptr;
+
+        $display("");
+        $display("DU finished capturing the signal.");
+        $display("Oldest sample address: o_ptr = %0d", o_ptr);
+
+        //$display("");
+        //$display("Captured samples:");
+        //$display("");
+
+        //! Read the complete circular buffer in chronological order
+        for (int i = 0; i < DEPTH; i++) begin
+            //! Allow the combinational memory output to settle
+            @(negedge clk);
+            stored_data[i] = o_data;
+            //$display("sample[%0d] | du_mem[%0d] = %0d", i, i_rdaddr, o_data);
+
+            i_rdaddr = i_rdaddr + 1'b1;
+        end
+
+        //$display("");
+        //$display("Captured autocheking with known signal:");
+        //$display("");
+
+        //! Check wether the stored_data relates to the input data in the triggered moment
+        for (int i = 0; i < DEPTH; i++) begin
+            expected_idx = int'(trigger_idx_r) - (DEPTH - 1) + i;   // offset is (DEPTH - 1) because trigger sample is stored
+
+            if (stored_data[i] == mem_data[expected_idx])
+                match_count++;
+
+            //$display("Sample %0d: expected mem_data[%0d]=%0d, got=%0d", i, expected_idx, mem_data[expected_idx], stored_data[i]);
+        end
+
+        $display("");
+        $display("Matched samples : %0d/%0d", match_count, DEPTH); 
+        $display("");
+
+
+        $display("");
+        $display("================================================================");
+        $display("Test 3: POST mode");
+        $display("================================================================");
+        $display("");
+
+        match_count = 0;
+        expected_idx = 0;
+
+        //! Arm the DU and store the selected mode
+        i_mode = 2'b10;
+        i_arm  = 1'b1;
+
+        @(negedge clk);
+        i_arm = 1'b0;
+
+        //! Allow the circular buffer to wrap before applying the trigger
+        repeat (64) @(negedge clk);
+        
+        //! Generate a one-cycle trigger pulse
+        i_trigger = 1'b1;
+
+        @(negedge clk);
+        i_trigger = 1'b0;
+
+        //! Wait until the post-trigger capture is complete
+        wait (o_done);
+
+        //! When the circular buffer is full, o_ptr points to the oldest stored sample.
+        i_rdaddr = o_ptr;
+
+        $display("");
+        $display("DU finished capturing the signal.");
+        $display("Oldest sample address: o_ptr = %0d", o_ptr);
+
+        //$display("");
+        //$display("Captured samples:");
+        //$display("");
+
+        //! Read the complete circular buffer in chronological order
+        for (int i = 0; i < DEPTH; i++) begin
+            //! Allow the combinational memory output to settle
+            @(negedge clk);
+            stored_data[i] = o_data;
+            ///$display("sample[%0d] | du_mem[%0d] = %0d", i, i_rdaddr, o_data);
+
+            i_rdaddr = i_rdaddr + 1'b1;
+        end
+
+        //$display("");
+        //$display("Captured autocheking with known signal:");
+        //$display("");
+
+        //! Check wether the stored_data relates to the input data in the triggered moment
+        for (int i = 0; i < DEPTH; i++) begin
+            expected_idx = int'(trigger_idx_r) + i;
+
+            if (stored_data[i] == mem_data[expected_idx])
+                match_count++;
+
+            //$display("Sample %0d: expected mem_data[%0d]=%0d, got=%0d", i, expected_idx, mem_data[expected_idx], stored_data[i]);
+        end
+
+        $display("");
+        $display("Matched samples : %0d/%0d", match_count, DEPTH); 
+        $display("");
 
         $display("");
         $display("========================================");
