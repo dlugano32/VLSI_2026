@@ -2,147 +2,169 @@
 
 module async_fifo #(
     parameter int WIDTH = 8,
-    parameter int ADDR  = 4
+    parameter int DEPTH  = 4
 ) (
-    input  logic                 i_clk_r,
-    input  logic                 i_clk_w,
-    input  logic                 i_rst_r,
-    input  logic                 i_rst_w,
-    input  logic                 i_w_en,
-    input  logic                 i_r_en,
+    input  logic                 i_rd_clk,
+    input  logic                 i_wr_clk,
+    input  logic                 i_arst_n,
+    input  logic                 i_wr_en,
+    input  logic                 i_rd_en,
     input  logic [WIDTH - 1 : 0] i_data,
     output logic [WIDTH - 1 : 0] o_data,
     output logic                 o_empty,
     output logic                 o_full
 );
 
-    localparam int DEPTH = 1<<ADDR;
-    localparam int NB_PTR = ADDR + 1; //! Bit extra para detectar wrap
+    localparam int ADDR_W = $clog2(DEPTH);
+    localparam int PTR_W  = ADDR_W + 1;     //! Bit extra para detectar wrap
 
     //! Memoria de la FIFO
-    logic [WIDTH - 1 : 0] mem [DEPTH - 1 : 0];
+    logic [WIDTH  - 1 : 0] mem [DEPTH - 1 : 0];
 
     //! Direcciones físicas de la memoria
-    logic [ADDR - 1 : 0] w_addr;
-    logic [ADDR - 1 : 0] r_addr;
+    logic [ADDR_W - 1 : 0] wr_addr;
+    logic [ADDR_W - 1 : 0] rd_addr;
+
+    //! Reset de punteros sincronizados a sus respectivos dominios de clock
+    logic rd_rst_n;
+    logic wr_rst_n;
 
     //! Punteros binarios extendidos
-    logic [NB_PTR - 1 : 0] w_ptr;
-    logic [NB_PTR - 1 : 0] r_ptr;
-    logic [NB_PTR - 1 : 0] w_ptr_next;
-    logic [NB_PTR - 1 : 0] r_ptr_next;
+    logic [PTR_W - 1 : 0] rd_ptr_r;
+    logic [PTR_W - 1 : 0] wr_ptr_r;
+    logic [PTR_W - 1 : 0] rd_ptr_next;
+    logic [PTR_W - 1 : 0] wr_ptr_next;
 
     //! Punteros codificados en Gray
-    logic [NB_PTR - 1 : 0] w_ptr_gr;
-    logic [NB_PTR - 1 : 0] r_ptr_gr;
-
-    //! Registro de punteros codificados en Gray
-    logic [NB_PTR - 1 : 0] r_ptr_gr_reg;
-    logic [NB_PTR - 1 : 0] w_ptr_gr_reg;
+    logic [PTR_W - 1 : 0] wr_ptr_gr_r;
+    logic [PTR_W - 1 : 0] rd_ptr_gr_r;
+    logic [PTR_W - 1 : 0] wr_ptr_gr_next;
+    logic [PTR_W - 1 : 0] rd_ptr_gr_next;
 
     //! Punteros sincronizados entre dominios de clock
-    logic [NB_PTR - 1 : 0] sync_w_ptr_gr; //! w_ptr_gr sincronizado hacia i_clk_r
-    logic [NB_PTR - 1 : 0] sync_r_ptr_gr; //! r_ptr_gr sincronizado hacia i_clk_w
+    logic [PTR_W - 1 : 0] wr_ptr_gr_sync;   //! wr_ptr_gr_sync sincronizado hacia i_clk_r
+    logic [PTR_W - 1 : 0] rd_ptr_gr_sync;   //! rd_ptr_gr_sync sincronizado hacia i_clk_w
 
     //! Operaciones válidas de escritura y lectura
-    logic w_push;
-    logic r_pop;
+    logic wr_push;
+    logic rd_pop;
+
+    sync_rst_n #(
+        .PIPE(3)
+    ) sync_rd_rst_n (
+        .i_clk(i_rd_clk),
+        .i_arst_n(i_arst_n),
+        .o_rst_n(rd_rst_n)
+    );
+
+    sync_rst_n #(
+        .PIPE(3)
+    ) sync_wr_rst_n (
+        .i_clk(i_wr_clk),
+        .i_arst_n(i_arst_n),
+        .o_rst_n(wr_rst_n)
+    );
 
     //! Escribir memoria
-    always_ff @(posedge i_clk_w) begin : write_mem
-        if (w_push) begin
-            mem[w_addr] <= i_data;
+    always_ff @(posedge i_wr_clk) begin
+        if(wr_push) begin
+            mem[wr_addr] <= i_data;
         end
     end
 
-    //! Leer memoria
-    always_ff @(posedge i_clk_r) begin : read_mem
-        if (i_rst_r) begin
-            o_data <= '0;
-        end else if (r_pop)
-            o_data <= mem[r_addr];
+    assign wr_addr = wr_ptr_r[ADDR_W - 1 : 0];
+    assign wr_push = (~o_full) && i_wr_en;
+
+
+    //! Escribir memoria
+    always_ff @(posedge i_rd_clk) begin
+        if(rd_pop) begin
+            o_data <= mem[rd_addr];
+        end
     end
+    assign rd_addr = rd_ptr_r[ADDR_W - 1 : 0];
+    assign rd_pop = (~o_empty) && i_rd_en;
+
 
     //! FIFO de escritura
-    always_ff @(posedge i_clk_w) begin : write_ptr
-        if (i_rst_w) begin
-            w_ptr <= '0;
-        end else if (w_push) begin
-            w_ptr       <= w_ptr_next;
+    always_ff @(posedge i_wr_clk) begin
+        if(!wr_rst_n) begin
+            wr_ptr_r <= '0;
+        end else if(wr_push)begin
+            wr_ptr_r <= wr_ptr_next;
         end
     end
 
-    assign w_push = i_w_en && ~o_full;
-    assign w_ptr_next = w_push ? w_ptr + 1'b1 : w_ptr;
-    assign w_addr = w_ptr[ADDR - 1 : 0]; //! Dirección sin el bit de wrap
+    assign wr_ptr_next = wr_push ? (wr_ptr_r + 1'b1) : wr_ptr_r;
+
 
     //! FIFO de lectura
-    always_ff @(posedge i_clk_r) begin : read_ptr
-        if (i_rst_r) begin
-            r_ptr  <= '0;
-        end else if (r_pop) begin
-            r_ptr  <= r_ptr_next;
+    always_ff @(posedge i_rd_clk) begin
+        if(!rd_rst_n) begin
+            rd_ptr_r <= '0;
+        end else if(rd_pop) begin
+            rd_ptr_r <= rd_ptr_next;
         end
     end
 
-    assign r_pop = i_r_en && ~o_empty;
-    assign r_ptr_next = r_pop ? r_ptr + 1'b1 : r_ptr;
-    assign r_addr = r_ptr[ADDR - 1 : 0]; //! Dirección sin el bit de wrap
+    assign rd_ptr_next = rd_pop ? (rd_ptr_r + 1'b1) : rd_ptr_r;
 
     //! Conversión a Gray
     //! Se usa Gray porque entre incrementos consecutivos cambia un solo bit.
-    //! Esto reduce el riesgo de metaestabilidad al cruzar los punteros entre dominios de clock.
-    assign w_ptr_gr = w_ptr ^ (w_ptr >> 1);
-    assign r_ptr_gr = r_ptr ^ (r_ptr >> 1);
+    //! Esto reduce el riesgo de incoherencia al cruzar los punteros entre dominios de clock.
 
-    always_ff @(posedge i_clk_r) begin : r_ptr_reg
-        if(i_rst_r) begin
-            r_ptr_gr_reg <= '0;
+    //! Conversion Gray del puntero de escritura
+    assign wr_ptr_gr_next = wr_ptr_next ^ (wr_ptr_next >> 1);
+
+    always_ff @(posedge i_wr_clk) begin
+        if(!wr_rst_n) begin
+            wr_ptr_gr_r <= '0;
         end else begin
-            r_ptr_gr_reg <= r_ptr_gr;
+            wr_ptr_gr_r <= wr_ptr_gr_next;
         end
     end
 
-    always_ff @(posedge i_clk_w) begin : w_ptr_reg
-        if(i_rst_w) begin
-            w_ptr_gr_reg <= '0;
+
+    //! Conversion Gray del puntero de lectura
+    assign rd_ptr_gr_next = rd_ptr_next ^ (rd_ptr_next >> 1);
+
+    always_ff @(posedge i_rd_clk) begin
+        if(!rd_rst_n) begin
+            rd_ptr_gr_r <= '0;
         end else begin
-            w_ptr_gr_reg <= w_ptr_gr;
+            rd_ptr_gr_r <= rd_ptr_gr_next;
         end
     end
-    
-    //! sync_w_ptr_gr:
-    //!     w_ptr_gr debe sincronizarse desde i_clk_w hacia i_clk_r.
+
+    //! Cruce de dominio de punteros
     sync_bus #(
-        .NB_DATA (NB_PTR),
-        .PIPE    (3)
-    ) u_sync_w_ptr (
-        .i_clk  (i_clk_r),
-        .i_rst  (i_rst_r),
-        .i_data (w_ptr_gr_reg),
-        .o_data (sync_w_ptr_gr)
+        .PIPE(3),
+        .WIDTH(PTR_W)
+    ) u_sync_rd_ptr_gr (
+        .o_data(rd_ptr_gr_sync),
+        .i_data(rd_ptr_gr_r),
+        .i_rst_n(wr_rst_n),
+        .i_clk(i_wr_clk)
     );
 
-    //! sync_r_ptr_gr:
-    //!     r_ptr_gr debe sincronizarse desde i_clk_r hacia i_clk_w.
     sync_bus #(
-        .NB_DATA (NB_PTR),
-        .PIPE    (3)
-    ) u_sync_r_ptr (
-        .i_clk  (i_clk_w),
-        .i_rst  (i_rst_w),
-        .i_data (r_ptr_gr_reg),
-        .o_data (sync_r_ptr_gr)
+        .PIPE(3),
+        .WIDTH(PTR_W)
+    ) u_sync_wr_ptr_gr (
+        .o_data(wr_ptr_gr_sync),
+        .i_data(wr_ptr_gr_r),
+        .i_rst_n(rd_rst_n),
+        .i_clk(i_rd_clk)
     );
 
     //! Condicion Empty
     //! La FIFO está vacía cuando el puntero de lectura alcanza al puntero de escritura sincronizado al dominio de lectura.
     //! La condicion es bloqueante a la lectura.
-    assign o_empty = (sync_w_ptr_gr == r_ptr_gr);
+    assign o_empty =  (rd_ptr_gr_r == wr_ptr_gr_sync);
 
     //! Condicion Full
     //! La FIFO está llena cuando el puntero de escritura está una vuelta por delante del puntero de lectura sincronizado al dominio de escritura.
     //! En Gray, esta condición se detecta invirtiendo los dos MSB del puntero de lectura sincronizado.
-    assign o_full = (w_ptr_gr == {~sync_r_ptr_gr[NB_PTR - 1 -: 2], sync_r_ptr_gr[NB_PTR - 3 : 0]});
+    assign o_full  =  (wr_ptr_gr_r == {~rd_ptr_gr_sync[PTR_W - 1 -: 2], rd_ptr_gr_sync[PTR_W - 3 : 0]});
 
 endmodule

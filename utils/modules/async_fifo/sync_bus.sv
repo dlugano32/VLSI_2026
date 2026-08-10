@@ -1,31 +1,31 @@
 `timescale 1ns/1ps
 
 module sync_bus #(
-    parameter int NB_DATA = 3,
-    parameter int PIPE    = 3
+    parameter int PIPE = 2,
+    parameter int WIDTH = 8
 ) (
-    input  logic                  i_clk,
-    input  logic                  i_rst,
-    input  logic [NB_DATA-1 : 0]  i_data,
-    output logic [NB_DATA-1 : 0]  o_data
+    output logic [WIDTH - 1 : 0] o_data,
+    input  logic [WIDTH - 1 : 0] i_data,
+    input  logic i_rst_n,
+    input  logic i_clk
 );
 
-    logic [NB_DATA-1 : 0] pipe [PIPE-1 : 0];
+    logic [WIDTH - 1 : 0] pipe_r [PIPE - 1 : 0];
 
     always_ff @(posedge i_clk) begin
-        if (i_rst) begin
-            for (int i = 0; i < PIPE; i++) begin
-                pipe[i] <= '0;
+        if(!i_rst_n) begin
+            for(int i= 0; i<PIPE; i++) begin
+                pipe_r[i] <= '0;
             end
         end else begin
-            pipe[0] <= i_data;
+            pipe_r[0] <= i_data;
 
-            for (int i = 1; i < PIPE; i++) begin
-                pipe[i] <= pipe[i-1];
+            for(int i = 1; i<PIPE; i++) begin
+                pipe_r[i] <= pipe_r[i-1];
             end
         end
     end
 
-    assign o_data = pipe[PIPE-1];
+    assign o_data = pipe_r[PIPE - 1];
 
 endmodule
