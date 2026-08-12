@@ -5,19 +5,19 @@
 //! @brief Generates one of six selectable PRBS sequences using a shared LFSR.
 
 module prbs # (
-    parameter int MAX_ORDER = 15
+    parameter int WIDTH = 15
 ) (
     input  logic                     i_clk,
     input  logic                     i_rst_n,
     input  logic                     i_en,
     input  logic [2 : 0]             i_sel,
-    input  logic [MAX_ORDER - 1 : 0] i_seed,
+    input  logic [WIDTH - 1 : 0] i_seed,
 
     output logic                     o_prbs
 );
 
-    logic [MAX_ORDER - 1 : 0] lfsr_r;
-    logic [MAX_ORDER - 1 : 0] lfsr_next;
+    logic [WIDTH - 1 : 0] lfsr_r;
+    logic [WIDTH - 1 : 0] lfsr_next;
 
     always_ff @(posedge i_clk or negedge i_rst_n) begin
         if (!i_rst_n) begin
