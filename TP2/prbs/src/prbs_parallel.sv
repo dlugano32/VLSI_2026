@@ -11,29 +11,45 @@ module prbs_parallel # (
 ) (
     input  logic                     i_clk,
     input  logic                     i_rst_n,
-    input  logic                     i_en,
+    input  logic                     i_start,
+    input  logic                     i_stop,
     input  logic [2 : 0]             i_sel,
     input  logic [MAX_ORDER - 1 : 0] i_seed,
 
-    output logic o_prbs [P - 1 : 0]
+    output logic o_prbs [P - 1 : 0],
+    output logic o_running
 );
 
     logic [MAX_ORDER - 1 : 0] lfsr_r;
     logic [MAX_ORDER - 1 : 0] lfsr_next;
+    logic [2 : 0]             sel_r;
+    logic                     running_r;
 
+    //! Sequence control. i_start and i_stop are synchronous to i_clk.
+    //! The selected order and seed are captured only when a new sequence starts.
     always_ff @(posedge i_clk or negedge i_rst_n) begin
         if (!i_rst_n) begin
-            lfsr_r <= i_seed;
-        end else if (i_en) begin
+            lfsr_r    <= '0;
+            sel_r     <= '0;
+            running_r <= 1'b0;
+        end else if (i_stop) begin
+            running_r <= 1'b0;
+        end else if (i_start) begin
+            lfsr_r    <= i_seed;
+            sel_r     <= i_sel;
+            running_r <= 1'b1;
+        end else if (running_r) begin
             lfsr_r <= lfsr_next;
         end
     end
+
+    assign o_running = running_r;
 
     //! Next-state logic
     always_comb begin
         lfsr_next = '0;
 
-        case (i_sel)
+        case (sel_r)
             3'b000: begin
                 //! PRBS10: x^10 + x^7 + 1
                 lfsr_next[9:0] = {lfsr_r[5:0],
@@ -102,7 +118,7 @@ module prbs_parallel # (
 
     //! PRBS output
     always_comb begin
-        case (i_sel)
+        case (sel_r)
             3'b000: begin // PRBS10
                 o_prbs[0] = lfsr_r[9];
                 o_prbs[1] = lfsr_r[8];

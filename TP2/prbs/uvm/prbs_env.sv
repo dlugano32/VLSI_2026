@@ -1,14 +1,14 @@
-class prbs_env #(parameter int WIDTH = 15);
+class prbs_env;
 
-    virtual prbs_if #(WIDTH) vif;
+    virtual prbs_if vif;
 
     mailbox #(prbs_txn) gen2drv;
 
-    prbs_generator           gen;
-    prbs_driver  #(WIDTH)    drv;
-    prbs_monitor #(WIDTH)    mon;
+    prbs_generator gen;
+    prbs_driver    drv;
+    prbs_monitor   mon;
 
-    function new(virtual prbs_if #(WIDTH) vif);
+    function new(virtual prbs_if vif);
         this.vif = vif;
 
         gen2drv = new();
@@ -30,7 +30,8 @@ class prbs_env #(parameter int WIDTH = 15);
         
         wait (drv.prbs_done == gen.iteration);
 
-        repeat (50) @(vif.cb);
+        repeat (5) @(vif.cb);
+        mon.close();
     endtask 
     
     function void report();

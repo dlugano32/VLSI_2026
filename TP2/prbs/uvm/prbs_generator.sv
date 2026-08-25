@@ -9,7 +9,7 @@ class prbs_generator;
     endfunction
 
     task run();
-        prbs_txn #(WIDTH) tr;
+        prbs_txn tr;
 
         repeat (iteration) begin
             tr=new();
