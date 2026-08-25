@@ -83,7 +83,7 @@ module sop #(
     //! Product register
     generate
         for (i = 0; i < N_PREADD; i++) begin : gen_product_reg
-            always_ff @(posedge i_clk) begin : product_reg
+            always_ff @(posedge i_clk or negedge i_rst_n) begin : product_reg
                 if (!i_rst_n) begin
                     prod_reg[i] <= '0;
                 end else if (i_en) begin

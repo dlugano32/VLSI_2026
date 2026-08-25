@@ -2,7 +2,7 @@
 
 module du #(
     parameter  int WIDTH  = 12,
-    parameter  int DEPTH  = 1024, //! Debe ser siempre potencia de dos
+    parameter  int DEPTH  = 256, //! Debe ser siempre potencia de dos
     localparam int ADDR_W = $clog2(DEPTH)
 ) (
     input  logic                   i_arm, // Pulse synced from CPU
@@ -146,10 +146,6 @@ module du #(
     end
 
     //! Read Mem
-    //! TODO: Entiendo que se puede hacer de forma combinacional porque el dato va a estar estable
-    //! Sin embargo me surge la duda si en terminos de recursos lo que infiere, que sería
-    //! un banco de registros y un mux grande, para la lectura es mas o menos eficiente que una 
-    //! lectura como si fuera una bram sincrónica
     always_comb begin
         if(state_r == DONE)
             o_data = mem[i_rdaddr];

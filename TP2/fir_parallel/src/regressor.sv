@@ -33,7 +33,7 @@ module regressor #(
                 if (IDX < N_REGS) begin : gen_valid_reg
 
                     if (i == 0) begin : gen_first_level
-                        always_ff @(posedge i_clk) begin
+                        always_ff @(posedge i_clk or negedge i_rst_n) begin
                             if (!i_rst_n)
                                 regs[i][j] <= '0;
                             else if (i_en)
@@ -41,7 +41,7 @@ module regressor #(
                         end
 
                     end else begin : gen_delay_level
-                        always_ff @(posedge i_clk) begin
+                        always_ff @(posedge i_clk or negedge i_rst_n) begin
                             if (!i_rst_n)
                                 regs[i][j] <= '0;
                             else if (i_en)
