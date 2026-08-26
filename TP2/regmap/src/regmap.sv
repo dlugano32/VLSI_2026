@@ -17,52 +17,58 @@ module regmap # (
     parameter int WIN_W = 19,
     parameter int CNT_W = 20
 ) (
-    input  logic clk,
-    input  logic rst_n,
+    input  logic i_clk,
+    input  logic i_rst_n,
 
     //! Bus
-    input  logic [W_ADDR - 1 : 0] addr,
-    input  logic [W_DATA - 1 : 0] wdata,
-    input  logic                  req,
-    input  logic                  is_write,
-    output logic [W_DATA - 1 : 0] rdata,
-    output logic                  ack,
+    input  logic           [W_ADDR - 1 : 0] addr,
+    input  logic           [W_DATA - 1 : 0] wdata,
+    input  logic                            req,
+    input  logic                            is_write,
+    output logic           [W_DATA - 1 : 0] rdata,
+    output logic                            ack,
 
     //! PRBS configuration
-    output logic          o_prbs_enable,
-    output logic [2  : 0] o_prbs_order_sel,
-    output logic [14 : 0] o_prbs_seed,
+    output logic                            o_prbs_start,
+    output logic                            o_prbs_stop,
+    output logic                   [2  : 0] o_prbs_order_sel,
+    output logic                   [14 : 0] o_prbs_seed,
+    input  logic                            i_prbs_running,
 
     //! Fir configuration
-    output logic signed [NB_COEFF - 1 : 0] o_fir_taps [(N_TAPS+1)/2 - 1 : 0], // TODO modificarlo a packed
+    output logic signed  [NB_COEFF - 1 : 0] o_fir_taps [(N_TAPS+1)/2 - 1 : 0],
+    output logic                            o_fir_commit,
+    input  logic                            i_fir_busy,
 
-    //! DU configuration //TODO modificar signedness
-    output logic o_du_arm,
-    output logic [1 : 0] o_du_mode,
-    output logic [NB_SAMPLE - 1 : 0] o_du_threshold,
-    output logic [DU_W_ADDR - 1 : 0] o_du_rdaddr,
+    //! DU configuration
+    output logic                            o_du_arm,
+    output logic                            o_du_rd_en,
+    output logic                    [1 : 0] o_du_mode,
+    output logic                    [1 : 0] o_du_select,
+    output logic        [DU_W_ADDR - 1 : 0] o_du_rdaddr,
+    output logic signed [NB_SAMPLE - 1 : 0] o_du_threshold,
 
     //! DU status
-    input  logic                     i_du_status,
-    input  logic [NB_SAMPLE - 1 : 0] i_du_rddata,
-    input  logic [DU_W_ADDR - 1 : 0] i_du_rdptr,
+    input logic                     [3 : 0] i_du_status,
+    input logic                             i_du_rd_valid,
+    input logic signed  [NB_SAMPLE - 1 : 0] i_du_rddata,
+    input logic         [DU_W_ADDR - 1 : 0] i_du_rdptr,
     
     //! Clk Meas configuration
-    output logic [WIN_W - 1 : 0] o_clkmeas_window,
-    output logic                 o_clkmeas_start,
-    input  logic [CNT_W - 1 : 0] i_clkmeas_count,
-    input  logic                 i_clkmeas_status,
+    output logic            [WIN_W - 1 : 0] o_clkmeas_window,
+    output logic                            o_clkmeas_start,
+    input  logic            [CNT_W - 1 : 0] i_clkmeas_count,
+    input  logic                            i_clkmeas_status
 
-    //! General purpose control flags
-    output logic [15 : 0] o_ctrl_flags
 );
 
     //! === Regmap addr ===
     // PRBS
     localparam logic [W_ADDR - 1 : 0] ADDR_PRBS_CTRL      = 8'h00;
     localparam logic [W_ADDR - 1 : 0] ADDR_PRBS_SEED      = 8'h01;
+    localparam logic [W_ADDR - 1 : 0] ADDR_PRBS_STATUS    = 8'h02;
 
-    // FIR (TODO : Revisar si conviene poner dos taps por addr)
+    // FIR
     localparam logic [W_ADDR - 1 : 0] ADDR_FIR_TAP_0      = 8'h10;
     localparam logic [W_ADDR - 1 : 0] ADDR_FIR_TAP_1      = 8'h11;
     localparam logic [W_ADDR - 1 : 0] ADDR_FIR_TAP_2      = 8'h12;
@@ -73,6 +79,8 @@ module regmap # (
     localparam logic [W_ADDR - 1 : 0] ADDR_FIR_TAP_7      = 8'h17;
     localparam logic [W_ADDR - 1 : 0] ADDR_FIR_TAP_8      = 8'h18;
     localparam logic [W_ADDR - 1 : 0] ADDR_FIR_TAP_9      = 8'h19;
+    localparam logic [W_ADDR - 1 : 0] ADDR_FIR_CTRL       = 8'h1A;
+    localparam logic [W_ADDR - 1 : 0] ADDR_FIR_STATUS     = 8'h1B;
 
     // DU
     localparam logic [W_ADDR - 1 : 0] ADDR_DU_CTRL        = 8'h20;
@@ -81,6 +89,7 @@ module regmap # (
     localparam logic [W_ADDR - 1 : 0] ADDR_DU_RDADDR      = 8'h23;
     localparam logic [W_ADDR - 1 : 0] ADDR_DU_RDDATA      = 8'h24;
     localparam logic [W_ADDR - 1 : 0] ADDR_DU_RDPTR       = 8'h25;
+    localparam logic [W_ADDR - 1 : 0] ADDR_DU_SELECT      = 8'h26;
 
     // Clk Meas
     localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_CTRL   = 8'h30;
@@ -88,89 +97,85 @@ module regmap # (
     localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_COUNT  = 8'h32;
     localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_STATUS = 8'h33;
 
-    // General-purpose control flags
-    localparam logic [W_ADDR - 1 : 0] ADDR_CTRL_FLAG      = 8'h40;
-
-
     //! === Vars ===
-    logic [W_DATA - 1 : 0] rdata_r;
-    logic [W_DATA - 1 : 0] rdata_next;
-    logic                  ack_r;
+    logic           [W_DATA - 1 : 0] rdata_r;
+    logic           [W_DATA - 1 : 0] rdata_next;
+    logic                            ack_r;
 
     //! === Regmap ===
     // PRBS
-    logic          prbs_enable_r;
-    logic [2  : 0] prbs_order_sel_r;
-    logic [14 : 0] prbs_seed_r;
+    logic                            prbs_start_r;
+    logic                            prbs_stop_r;
+    logic                   [2  : 0] prbs_order_sel_r;
+    logic                   [14 : 0] prbs_seed_r;
 
     // FIR
-    logic signed [NB_COEFF - 1 : 0] fir_taps_r [(N_TAPS+1)/2 - 1 : 0];
+    logic signed  [NB_COEFF - 1 : 0] fir_taps_r [(N_TAPS+1)/2 - 1 : 0];
+    logic                            fir_commit_r;
 
     // DU
-    logic                     du_arm_r;
-    logic [1 : 0]             du_mode_r;
-    logic [NB_SAMPLE - 1 : 0] du_threshold_r;
-    logic                     du_status_r; //! Sticky flag
-    logic [DU_W_ADDR - 1 : 0] du_rdaddr_r;
+    logic                            du_arm_r;
+    logic                    [1 : 0] du_mode_r;
+    logic signed [NB_SAMPLE - 1 : 0] du_threshold_r;
+    logic                    [1 : 0] du_select_r;
+    logic        [DU_W_ADDR - 1 : 0] du_rdaddr_r;
+    logic                            du_read_pending_r;
     
-    // Clkl Meas
-    logic                 clkmeas_start_r;
-    logic [WIN_W - 1 : 0] clkmeas_window_r;
-    logic                 clkmeas_status_r; //! Sticky flag
-
-    // General purpose flags
-    logic [15 : 0] ctrl_flags_r;
+    // Clk Meas
+    logic                            clkmeas_start_r;
+    logic            [WIN_W - 1 : 0] clkmeas_window_r;
 
     //! Logica secuencial del regmap
-    always_ff @(posedge clk) begin
-        if(!rst_n) begin
+    always_ff @(posedge i_clk or negedge i_rst_n) begin
+        if(!i_rst_n) begin
             ack_r   <= '0;
             rdata_r <= '0;
 
             // Inicialización de registros
-            prbs_enable_r    <= '0;
+            prbs_start_r     <= '0;
+            prbs_stop_r      <= '0;
             prbs_order_sel_r <= '0;
-            prbs_seed_r      <= '1;
+            prbs_seed_r      <= '0;
 
             for(integer i = 0; i< (N_TAPS+1)/2; i++)
                 fir_taps_r[i] <= '0;
 
-            du_arm_r         <= '0;
-            du_mode_r        <= '0;
-            du_threshold_r   <= '0;
-            du_status_r      <= '0;
-            du_rdaddr_r      <= '0;
+            fir_commit_r <= '0;
+
+            du_arm_r          <= '0;
+            du_mode_r         <= '0;
+            du_threshold_r    <= '0;
+            du_select_r       <= '0;
+            du_rdaddr_r       <= '0;
+            du_read_pending_r <= '0;
 
             clkmeas_start_r  <= '0;
             clkmeas_window_r <= '0;
-            clkmeas_status_r <= '0;
-
-            ctrl_flags_r     <= '0;
         end else begin
-            ack_r   <= req; // Ack sigue a req un ciclo de clk despues
-
-            du_arm_r <= 1'b0; // Pulse
+            ack_r           <= 1'b0; // Pulse
+            prbs_start_r    <= 1'b0; // Pulse
+            prbs_stop_r     <= 1'b0; // Pulse
+            fir_commit_r    <= 1'b0; // Pulse
+            du_arm_r        <= 1'b0; // Pulse
             clkmeas_start_r <= 1'b0; // Pulse
 
-            if (i_clkmeas_status) begin // Sticky bit
-                clkmeas_status_r <= 1'b1;
-            end else if (req && !is_write && addr == ADDR_CLKMEAS_STATUS) begin
-                clkmeas_status_r <= 1'b0;
-            end
-
-            if (i_du_status) begin // Sticky bit
-                du_status_r <= 1'b1;
-            end else if (req && !is_write && addr == ADDR_DU_STATUS) begin
-                du_status_r <= 1'b0;
-            end
-            
-            
-            if(req) begin
+            // La lectura de memoria de la DU es la unica transaccion con latencia, por ser una lectura sincronica.
+            // Mientras esta pendiente no se aceptan nuevas solicitudes.
+            if (du_read_pending_r) begin
+                if (i_du_rd_valid) begin
+                    rdata_r <= {{(W_DATA - NB_SAMPLE){i_du_rddata[NB_SAMPLE - 1]}},i_du_rddata}; // Extension de signo
+                    ack_r <= 1'b1;
+                    du_read_pending_r <= 1'b0;
+                end
+            end else if(req) begin
                 if(is_write) begin  // Write registers
+                    ack_r <= 1'b1;
+
                     case (addr)
                         ADDR_PRBS_CTRL: begin
-                            prbs_enable_r    <= wdata[0];
-                            prbs_order_sel_r <= wdata[3 : 1];
+                            prbs_start_r     <= wdata[0];
+                            prbs_stop_r      <= wdata[1];
+                            prbs_order_sel_r <= wdata[4 : 2];
                         end
 
                         ADDR_PRBS_SEED: begin
@@ -216,6 +221,10 @@ module regmap # (
                         ADDR_FIR_TAP_9: begin
                             fir_taps_r[9] <= $signed(wdata[NB_COEFF - 1 : 0]);
                         end
+
+                        ADDR_FIR_CTRL: begin
+                            fir_commit_r <= wdata[0];
+                        end
                         
                         ADDR_DU_CTRL: begin
                             du_arm_r   <= wdata[0];
@@ -230,6 +239,10 @@ module regmap # (
                             du_rdaddr_r <= wdata[DU_W_ADDR - 1 : 0];
                         end
 
+                        ADDR_DU_SELECT: begin
+                            du_select_r <= wdata[1 : 0];
+                        end
+
                         ADDR_CLKMEAS_CTRL: begin
                             clkmeas_start_r <= wdata[0];
                         end
@@ -238,16 +251,15 @@ module regmap # (
                             clkmeas_window_r <= wdata[WIN_W - 1 : 0];
                         end
 
-                        ADDR_CTRL_FLAG: begin
-                            ctrl_flags_r <= wdata[15 : 0];
-                        end
-
                         default: begin
                             // Invalid or RO address: ignore write.
                         end
                     endcase
+                end else if (addr == ADDR_DU_RDDATA) begin
+                    du_read_pending_r <= 1'b1;
                 end else begin // Read registers
                     rdata_r <= rdata_next;
+                    ack_r <= 1'b1;
                 end
             end
         end
@@ -260,12 +272,17 @@ module regmap # (
         case (addr)
 
             ADDR_PRBS_CTRL: begin
-                rdata_next[0]     = prbs_enable_r;
-                rdata_next[3 : 1] = prbs_order_sel_r;
+                rdata_next[0]     = 1'b0; // START pulse (WO)
+                rdata_next[1]     = 1'b0; // STOP pulse (WO)
+                rdata_next[4 : 2] = prbs_order_sel_r;
             end
 
             ADDR_PRBS_SEED: begin
                 rdata_next[14 : 0 ] = prbs_seed_r;
+            end
+
+            ADDR_PRBS_STATUS: begin
+                rdata_next[0] = i_prbs_running;
             end
 
             ADDR_FIR_TAP_0: begin
@@ -338,17 +355,25 @@ module regmap # (
                 };
             end
 
+            ADDR_FIR_CTRL: begin
+                rdata_next[0] = 1'b0; // COMMIT pulse (WO)
+            end
+
+            ADDR_FIR_STATUS: begin
+                rdata_next[0] = i_fir_busy;
+            end
+
             ADDR_DU_CTRL: begin
                 rdata_next[0]   = 1'b0;     // Pulso (WO)
                 rdata_next[2:1] = du_mode_r;
             end
             
             ADDR_DU_THRESHOLD: begin
-                rdata_next[NB_SAMPLE - 1 : 0] = du_threshold_r;
+                rdata_next = {{(W_DATA - NB_SAMPLE){du_threshold_r[NB_SAMPLE - 1]}}, du_threshold_r};
             end
 
             ADDR_DU_STATUS: begin
-                rdata_next[0] = du_status_r;
+                rdata_next[3 : 0] = i_du_status;
             end
 
             ADDR_DU_RDADDR: begin
@@ -356,17 +381,20 @@ module regmap # (
             end
 
             ADDR_DU_RDDATA: begin
-                rdata_next [NB_SAMPLE - 1 : 0] = i_du_rddata;
+                rdata_next = {{(W_DATA - NB_SAMPLE){i_du_rddata[NB_SAMPLE - 1]}}, i_du_rddata};
             end
 
             ADDR_DU_RDPTR: begin
                 rdata_next[DU_W_ADDR - 1 : 0] = i_du_rdptr;
             end
-            
-            // No tendría sentido leer un Pulso (WO)
-            //ADDR_CLKMEAS_CTRL: begin
-                //rdata_next[0] = clkmeas_start_r;
-            //end
+
+            ADDR_DU_SELECT: begin
+                rdata_next[1 : 0] = du_select_r;
+            end
+
+            ADDR_CLKMEAS_CTRL: begin
+                rdata_next[0] = 1'b0; //Pulso clkmeas_start (WO)
+            end
 
             ADDR_CLKMEAS_WINDOW: begin
                 rdata_next [WIN_W - 1 : 0] = clkmeas_window_r;
@@ -377,11 +405,7 @@ module regmap # (
             end
 
             ADDR_CLKMEAS_STATUS: begin
-                rdata_next[0] = clkmeas_status_r;
-            end
-
-            ADDR_CTRL_FLAG: begin
-                rdata_next[15 : 0] = ctrl_flags_r;
+                rdata_next[0] = i_clkmeas_status;
             end
 
             default: begin
@@ -394,15 +418,19 @@ module regmap # (
     assign ack = ack_r;
     assign rdata = rdata_r;
 
-    assign o_prbs_enable    = prbs_enable_r;
+    assign o_prbs_start     = prbs_start_r;
+    assign o_prbs_stop      = prbs_stop_r;
     assign o_prbs_order_sel = prbs_order_sel_r;
     assign o_prbs_seed      = prbs_seed_r;
     assign o_fir_taps       = fir_taps_r;
+    assign o_fir_commit     = fir_commit_r;
     assign o_du_arm         = du_arm_r;
     assign o_du_mode        = du_mode_r;
+    assign o_du_select      = du_select_r;
     assign o_du_threshold   = du_threshold_r;
     assign o_du_rdaddr      = du_rdaddr_r;
+    assign o_du_rd_en       = req && !is_write && (addr == ADDR_DU_RDDATA) && !du_read_pending_r;
     assign o_clkmeas_window = clkmeas_window_r;
     assign o_clkmeas_start  = clkmeas_start_r;
-    assign o_ctrl_flags     = ctrl_flags_r;
+
 endmodule

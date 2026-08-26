@@ -34,30 +34,36 @@ module tb_regmap ();
     logic                  ack;
 
     //! PRBS configuration
-    logic          o_prbs_enable;
+    logic          o_prbs_start;
+    logic          o_prbs_stop;
     logic [2  : 0] o_prbs_order_sel;
     logic [14 : 0] o_prbs_seed;
+    logic          i_prbs_running;
 
     //! Fir configuration
     logic signed [NB_COEFF - 1 : 0] o_fir_taps [(N_TAPS+1)/2 - 1 : 0];
+    logic                             o_fir_commit;
+    logic                             i_fir_busy;
 
     //! DU configuration
-    logic o_du_arm;
-    logic o_du_rearm;
-    logic [NB_SAMPLE - 1 : 0] o_du_threshold;
-    logic [DU_W_ADDR - 1 : 0] o_du_rdaddr;
+    logic                            o_du_arm;
+    logic                            o_du_rd_en;
+    logic                    [1 : 0] o_du_mode;
+    logic                    [1 : 0] o_du_select;
+    logic signed [NB_SAMPLE - 1 : 0] o_du_threshold;
+    logic        [DU_W_ADDR - 1 : 0] o_du_rdaddr;
 
     //! DU status
-    logic                     i_du_status;
-    logic [NB_SAMPLE - 1 : 0] i_du_rddata;
+    logic                    [3 : 0] i_du_status;
+    logic                            i_du_rd_valid;
+    logic signed [NB_SAMPLE - 1 : 0] i_du_rddata;
+    logic        [DU_W_ADDR - 1 : 0] i_du_rdptr;
     
     //! Clk Meas configuration
     logic [WIN_W - 1 : 0] o_clkmeas_window;
+    logic                 o_clkmeas_start;
     logic [CNT_W - 1 : 0] i_clkmeas_count;
     logic                 i_clkmeas_status;
-
-    //! General purpose control flags
-    logic [15 : 0] o_ctrl_flags;
 
     //! === Regmap addr ===
     // PRBS
@@ -84,12 +90,10 @@ module tb_regmap ();
     localparam logic [W_ADDR - 1 : 0] ADDR_DU_RDDATA      = 8'h24;
 
     // Clk Meas
-    localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_WINDOW = 8'h30;
-    localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_COUNT  = 8'h31;
-    localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_STATUS = 8'h32;
-
-    // General-purpose control flags
-    localparam logic [W_ADDR - 1 : 0] ADDR_CTRL_FLAG      = 8'h40;
+    localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_CTRL   = 8'h30;
+    localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_WINDOW = 8'h31;
+    localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_COUNT  = 8'h32;
+    localparam logic [W_ADDR - 1 : 0] ADDR_CLKMEAS_STATUS = 8'h33;
 
     //! === Clock generator ===
     initial clk = 1'b0;
@@ -100,14 +104,13 @@ module tb_regmap ();
         .W_ADDR(W_ADDR),
         .W_DATA(W_DATA),
         .NB_COEFF(NB_COEFF),
-        .N_TAPS(N_TAPS),
         .NB_SAMPLE(NB_SAMPLE),
         .DU_W_ADDR(DU_W_ADDR),
         .WIN_W(WIN_W),
         .CNT_W(CNT_W)
     ) u_regmap_dut (
-        .clk(clk),
-        .rst_n(rst_n),
+        .i_clk(clk),
+        .i_rst_n(rst_n),
         .addr(addr),
         .wdata(wdata),
         .req(req),
@@ -115,20 +118,28 @@ module tb_regmap ();
         .rdata(rdata),
         .ack(ack),
         
-        .o_prbs_enable(o_prbs_enable),
+        .o_prbs_start(o_prbs_start),
+        .o_prbs_stop(o_prbs_stop),
         .o_prbs_order_sel(o_prbs_order_sel),
         .o_prbs_seed(o_prbs_seed),
+        .i_prbs_running(i_prbs_running),
         .o_fir_taps(o_fir_taps),
+        .o_fir_commit(o_fir_commit),
+        .i_fir_busy(i_fir_busy),
         .o_du_arm(o_du_arm),
-        .o_du_rearm(o_du_rearm),
+        .o_du_rd_en(o_du_rd_en),
+        .o_du_mode(o_du_mode),
+        .o_du_select(o_du_select),
         .o_du_threshold(o_du_threshold),
         .o_du_rdaddr(o_du_rdaddr),
         .i_du_status(i_du_status),
+        .i_du_rd_valid(i_du_rd_valid),
         .i_du_rddata(i_du_rddata),
+        .i_du_rdptr(i_du_rdptr),
         .o_clkmeas_window(o_clkmeas_window),
+        .o_clkmeas_start(o_clkmeas_start),
         .i_clkmeas_count(i_clkmeas_count),
-        .i_clkmeas_status(i_clkmeas_status),
-        .o_ctrl_flags(o_ctrl_flags)
+        .i_clkmeas_status(i_clkmeas_status)
     );
 
 
@@ -149,8 +160,13 @@ module tb_regmap ();
         i_clkmeas_count  = '0;
         i_clkmeas_status = 1'b0;
 
-        i_du_status      = 1'b0;
+        i_prbs_running   = 1'b0;
+        i_fir_busy       = 1'b0;
+
+        i_du_status      = '0;
+        i_du_rd_valid    = 1'b0;
         i_du_rddata      = '0;
+        i_du_rdptr       = '0;
 
         $display("");
         $display("========================================");
@@ -166,7 +182,7 @@ module tb_regmap ();
 
         repeat (2) @(posedge clk);
 
-        // Test 1: CLKMEAS status sticky bit and count read
+        // Test 1: CLKMEAS status and count read
 
         $display("");
         $display("[TEST 1] CLKMEAS status and count read");
@@ -175,9 +191,6 @@ module tb_regmap ();
 
         @(negedge clk);
         i_clkmeas_status = 1'b1;
-
-        @(negedge clk);
-        i_clkmeas_status = 1'b0;
 
         repeat (5) @(posedge clk);
 
@@ -220,7 +233,7 @@ module tb_regmap ();
         end
 
         // Read CLKMEAS_STATUS again.
-        // Checking sticky bit logic
+        // DONE must remain high until a new measurement starts.
         @(negedge clk);
         req      = 1'b1;
         is_write = 1'b0;
@@ -234,10 +247,10 @@ module tb_regmap ();
 
         if (!ack) begin
             $display("[ERROR] Second CLKMEAS_STATUS read did not generate ACK");
-        end else if (rdata[0] !== 1'b0) begin
-            $display("[ERROR] CLKMEAS_STATUS was not cleared");
+        end else if (rdata[0] !== 1'b1) begin
+            $display("[ERROR] CLKMEAS_STATUS did not remain high");
         end else begin
-            $display("[PASS] CLKMEAS_STATUS cleared after read");
+            $display("[PASS] CLKMEAS_STATUS remained high after repeated reads");
         end
 
         // Test 2: Write CLKMEAS_WINDOW
