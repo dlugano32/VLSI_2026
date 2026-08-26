@@ -14,8 +14,8 @@ module sync_level #(
     logic [PIPE - 1 : 0] pipe_r;
 
     //! Synchronize the input level into the destination clock domain
-    always_ff @(posedge i_clk) begin
-        if (~i_rst_n) begin
+    always_ff @(posedge i_clk or negedge i_rst_n) begin
+        if (!i_rst_n) begin
             pipe_r <= '0;
         end else begin
             pipe_r[0] <= i_data;

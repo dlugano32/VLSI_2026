@@ -8,8 +8,8 @@ module rise_detector (
 );
     logic reg_signal;
 
-    always_ff @( posedge i_clk) begin
-        if (~i_rst_n)
+    always_ff @(posedge i_clk or negedge i_rst_n) begin
+        if (!i_rst_n)
             reg_signal <= 1'b0;
         else
             reg_signal <= i_signal;
