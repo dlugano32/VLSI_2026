@@ -27,6 +27,9 @@ module fir_parallel #(
 
     logic signed [NB_DATA - 1 : 0] sop_x [P - 1 : 0][N_TAPS - 1 : 0];
 
+    logic signed    [NB_O - 1 : 0] sop_y [P - 1 : 0];
+
+
     genvar i,j,k;
 
     regressor #(
@@ -61,7 +64,7 @@ module fir_parallel #(
                 .NBF_TAPS (NBF_TAPS),
                 .N_TAPS   (N_TAPS)
             ) u_sop (
-                .o_y     (o_data[i]),
+                .o_y     (sop_y[i]),
                 .i_x     (sop_x[i]),
                 .i_taps  (i_taps),
                 .i_en    (i_en),
@@ -71,5 +74,16 @@ module fir_parallel #(
 
         end
     endgenerate
+
+    //! Pipeline
+    always_ff @(posedge i_clk or negedge i_rst_n) begin
+        if (!i_rst_n) begin
+            for (int lane = 0; lane < P; lane++)
+                o_data[lane] <= '0;
+        end else if(i_en) begin
+            for (int lane = 0; lane < P; lane++)
+                o_data[lane] <= sop_y[lane];
+        end
+    end
 
 endmodule
