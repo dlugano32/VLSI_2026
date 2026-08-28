@@ -67,7 +67,7 @@ module top #(
     logic           [DU_W_ADDR - 1 : 0] du_rdptr_cpu;
     logic                               du_armed_cpu_r;
 
-    logic                               du_done_lane     [P - 1 : 0];
+    logic                       [P-1:0] du_done_lane;
     logic                               du_rd_en_lane    [P - 1 : 0];
     logic           [DU_W_ADDR - 1 : 0] du_rdaddr_lane   [P - 1 : 0];
     logic signed [FIR_SAMPLE_W - 1 : 0] du_odata_lane    [P - 1 : 0];
@@ -359,7 +359,7 @@ module top #(
                 .o_done     (du_done_lane[i])
             );
 
-            assign du_done_cpu [i] = du_done_lane[i] && !du_armed_cpu_r && !i_arm_cpu;
+            assign du_done_cpu [i] = du_done_lane[i] && !du_armed_cpu_r && !du_arm_cpu;
         end
     endgenerate
 
