@@ -3,27 +3,12 @@
 //! @author Damian Lugano
 //! @date 12-6-2026
 //!
-//! @brief Clock-domain crossing synchronizer for request pulses from a fast
-//! clock domain to a slower clock domain.
-//!
-//! This module transfers request events from clock domain `i_clk_a` to clock
-//! domain `i_clk_b` using a toggle-based synchronization scheme. The request
-//! will be seen in the slower clock domain as a pulse given the xor at the
-//! output.
-//!
-//! @note
-//! Since this module transfers events using a toggle, two or more request
-//! pulses occurring too close together in the source domain may be missed by
-//! the destination domain if the slower clock does not sample each toggle
-//! transition.
-//!
-//! @param PIPE  Number of synchronization pipeline stages in the destination
-//!              clock domain. Must be at least 2.
+//! @brief Clock-domain crossing synchronizer for request pulses from a fast clock domain to a slower clock domain.
 
 `timescale 1ns/1ps
 
-module req_sync #(
-    parameter int PIPE = 4
+module req_toggle #(
+    parameter int PIPE = 3
 ) (
     input  logic i_clk_a,
     input  logic i_clk_b,
@@ -40,8 +25,8 @@ module req_sync #(
     logic pipe [PIPE - 1 : 0];
 
     //! Toggle generation in source clock domain
-    always_ff @(posedge i_clk_a) begin : src_toggle
-        if (i_rst_a) begin
+    always_ff @(posedge i_clk_a or negedge i_rst_a) begin : src_toggle
+        if (!i_rst_a) begin
             toggle <= 1'b0;
         end else if (i_req) begin
             toggle <= ~toggle;
@@ -49,8 +34,8 @@ module req_sync #(
     end
 
     //! Toggle synchronization into destination clock domain
-    always_ff @(posedge i_clk_b) begin : dst_pipe
-        if (i_rst_b) begin
+    always_ff @(posedge i_clk_b or negedge i_rst_b) begin : dst_pipe
+        if (!i_rst_b) begin
             for (int i = 0; i < PIPE; i++) begin
                 pipe[i] <= 1'b0;
             end
