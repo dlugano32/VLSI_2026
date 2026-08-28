@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 
 module sync_level #(
-    parameter int PIPE = 2
+    parameter int PIPE = 3
 ) (
     output logic o_data,
 
