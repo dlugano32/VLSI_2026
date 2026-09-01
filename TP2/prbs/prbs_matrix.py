@@ -13,9 +13,9 @@ def matrix_power_gf2(A, power):
 
 def main():
 
-    PRBS = 13
+    PRBS = 10
     P = 4
-    TAPS = [1, 3, 4, 13]
+    TAPS = [7, 10]
 
     A = np.zeros((PRBS,PRBS))
 
