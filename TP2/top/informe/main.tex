@@ -69,7 +69,7 @@ El objetivo de este trabajo es el diseño de un sistema capaz de generar un est�
 procesarlo, y luego observarlo con una ventana de captura, todo controlado a través 
 de un mapa  de registros, siendo este la única conexión entre el software y el 
 hardware. Además,  este modulo integrará un modulo de medición de frecuencia, para 
-chequear que la frecuencia del clock es la correcta.
+chequear que la frecuencia de ambos clock del sistema sea la esperada.
 
 \subsection{Arquitectura general}
 El diseño contemplará 5 bloques principales, cada uno con una función definida.
@@ -117,11 +117,11 @@ muestras hasta completar su memoria. Luego de eso, su memoria podrá ser leida
 secuencialmente mediante  el regmap.
 
 En este caso, al tratarse de una implementación paralela, se instanciarán 4 DUs, que 
-se dispararáncon la misma señal de trigger en simultaneo y capturarán la señal de 
-forma paralela en simultaneo.
+se dispararán con la misma señal de trigger en simultaneo y capturarán la señal de 
+forma paralela.
 
 Su funcionamiento será principalmente en el clock DSP, aunque la lectura de la memoria
-será sincrónica al clock de CPU, para su lectura mediante el regmap.
+será sincrónica al clock de CPU.
 
 \subsubsection*{Bloque D: Medidor de frecuencia de clock}
 El medidor de frecuencia de clock es un modulo que, si bien no forma parte del 
@@ -165,15 +165,15 @@ de registros y son capturadas al inicio una nueva secuencia.
 La Tabla~\ref{tab:prbs-polinomios} presenta los seis polinomios implementados y el
 valor utilizado para seleccionarlos. Cada término del polinomio determina uno de los
 taps que intervienen en la realimentación del LFSR. Las sumas se realizan en el campo
-de Galois $\mathrm{GF}(2)$, por lo que se implementan mediante operaciones XOR.
+de $\mathrm{GF}(2)$, por lo que se implementan mediante operaciones XOR.
 
 \begin{table}[H]
     \centering
     \caption{Polinomios implementados por el generador PRBS.}
     \label{tab:prbs-polinomios}
-    \begin{tabular}{ccc}
+    \begin{tabular}{ccl}
         \toprule
-        \textbf{Selección} & \textbf{Patrón} & \textbf{Polinomio} \\
+        \textbf{i\_sel} & \textbf{Patrón} & \textbf{Polinomio} \\
         \midrule
         \texttt{000} & PRBS10 & $x^{10}+x^7+1$ \\
         \texttt{001} & PRBS11 & $x^{11}+x^9+1$ \\
@@ -208,7 +208,7 @@ En cambio, se eleva la matriz de transición a la potencia correspondiente al gr
 
 En este diseño $P=4$, por lo que el próximo estado se calcula mediante $A^4$. Un
 script desarrollado en Python construye la matriz $A$ a partir de los taps, se calcula
-su cuarta potencia módulo 2 y permite obtener las ecuaciones XOR utilizadas en el
+su cuarta potencia en $\mathrm{GF}(2)$ y permite obtener las ecuaciones XOR utilizadas en el
 RTL.
 
 \subsubsection*{Ejemplo para PRBS10}
@@ -336,15 +336,14 @@ cada orden se usó una semilla con todos sus bits en uno. Las salidas del RTL se
 compararon bit a bit con secuencias generadas mediante un modelo de referencia 
 desarrollado en Python.
 
-Después, se implementó un testbench más robusto basado en clases y organizado con una
-estructura tipo UVM. En este tesbench, se implementó: un generador que crea 
-configuraciones aleatorias válidas de polinomio, semilla y duración; un driver que aplica 
-la secuencia de reset, configuración, START y STOP; y un monitor que registra los cuatro 
-bits producidos en cada ciclo. Finalmente, las muestras capturadas se comparan con el modelo 
-de referencia de Python. 
+Después, se implementó un testbench más robusto basado en clases tipo UVM. Las clases 
+desarrolladas fueron: un generador que crea configuraciones aleatorias válidas de polinomio, 
+semilla  y duración; un driver que aplica  la secuencia de reset, configuración, START y 
+STOP; y un  monitor que registra los cuatro  bits producidos en cada ciclo. Finalmente, 
+las muestras capturadas se comparan con el modelo  de referencia de Python. 
 
-De esta manera severificó tanto la correspondencia de las secuencias paralelas con el modelo serial
-como el comportamiento de control del módulo frente a diferentes configuraciones.
+De esta manera severificó tanto la correspondencia de las secuencias paralelas con el modelo 
+serial como el comportamiento de control del módulo frente a configuraciones aleatorias.
 
 % ---------------------------------------------------------------------------
 \section{Bloque B: Filtro FIR (\texttt{fir\_parallel})}
@@ -484,7 +483,7 @@ De esta manera se obtienen cuatro resultados consecutivos por ciclo.
 
 La verificación del filtro FIR paralelo se realizó utilizando un testbench básico.
 En el mismo se le ingresa una señal PAM-2 aleatoria y se comprueba su salida haciendo 
-vector matching con una señal obtenida del golden reference en diseñado en python.
+vector matching con una señal obtenida del golden reference diseñado en python.
 
 \clearpage
 
@@ -506,7 +505,7 @@ cuando al menos una de las cuatro salidas del FIR supera el umbral configurado,
 quedando la posición del evento de disparo dentro de la ventana depende del modo 
 seleccionado.
 
-Los modos de captura de la DU se resuemen en la Tabla~\ref{tab:du-modos}.
+Los modos de captura de la DU se resumen en la Tabla~\ref{tab:du-modos}.
 
 \begin{table}[H]
     \centering
@@ -568,15 +567,14 @@ Las ecuaciones de control de la máquina de estados se expresan a continuación:
 \label{eq:du-write-enable}
 \end{equation}
 
-El valor objetivo del contador posterior al trigger se determina mediante
+El valor objetivo del contador posterior al trigger se determina mediante:
 
 \begin{equation}
 \text{\texttt{target = (mode\_r == MID) ? ((DEPTH/2) - 1) : (DEPTH - 1)}}
 \label{eq:du-target}
 \end{equation}
 
-Por lo tanto, la condición que finaliza la etapa de captura y la indicación interna
-de captura completa son
+Por lo tanto, la condición que finaliza la etapa de captura es:
 
 \begin{align}
 \text{\texttt{capture\_done}} & =
@@ -615,12 +613,11 @@ captura en orden cronológico.
 \end{figure}
 
 La señal \texttt{done\_wr} se sincroniza hacia el dominio CPU, con un sincronizador 
-de FF. La lectura solo se habilita cuando esta señal sincronizada está activa, 
-evitando accesos mientras la memoria aún está siendo modificada. El puerto de lectura 
-es síncrono: ante \texttt{i\_rd\_en} y una dirección válida, el dato se registra en
-\texttt{o\_data} y \texttt{o\_rd\_valid} se activa durante la respuesta. El puntero
-final también se mantiene estable y se entrega al mapa de registros para que el
-software determine la primera dirección que debe leer.
+de nivel en base a FF. La lectura solo se habilita cuando esta señal sincronizada está activa, 
+evitando accesos mientras la memoria aún está siendo modificada. El proceso de lectura es síncrono, 
+ante \texttt{i\_rd\_en} y una dirección válida, el dato se registra en \texttt{o\_data} y 
+\texttt{o\_rd\_valid} se activa durante la respuesta. El puntero final también se mantiene 
+estable y se entrega al mapa de registros para que el software determine la primera dirección que debe leer.
 
 \subsection{Verificación}
 
@@ -676,18 +673,16 @@ $f_{in}=1\ \text{GHz}$, la cantidad esperada de ciclos dentro de la ventana es
 \end{equation}
 
 
-Como el resultado se obtiene contando flancos, la mínima variación es de
-una cuenta. Esa variación equivale a un paso de frecuencia
-$\Delta f=f_{ref}/W$. La resolución relativa compara dicho paso con la frecuencia
-medida y expresa qué fracción del valor total representa la menor diferencia que el
-frecuencímetro puede distinguir. Cuanto menor es esta relación, mayor es la precisión
-de la medición; por ejemplo, una resolución de 1 ppm equivale a una parte en un
-millón, es decir, $10^{-6}$. Por lo tanto, la resolución relativa del contador es:
+Como la medición se realiza contando flancos, la menor variación observable en el
+resultado corresponde a una cuenta. Esto produce una variación mínima en la 
+frecuencia estimada de $\Delta f=f_{ref}/{W}$. La resolución relativa 
+se obtiene normalizando este incremento respecto de la frecuencia de entrada:
 
 \begin{equation}
-    \frac{\Delta f}{f_{in}} =\frac{f_{ref}}{W\,f_{in}}
-    =\frac{1}{N_{in}}
-    \label{eq:freq_resolution}
+\frac{\Delta f}{f_{in}}
+=\frac{f_{ref}}{W,f_{in}}
+=\frac{1}{N_{in}}
+\label{eq:relative_res}
 \end{equation}
 
 Para obtener un error de 1ppm ($10^{-6}$) se requiere entonces:
@@ -766,11 +761,11 @@ El segundo cruce transfiere el nivel \texttt{done\_in\_r} en sentido contrario. 
 señal se mantiene en uno desde que finaliza una medición hasta que comienza la siguiente, 
 por lo que también puede sincronizarse como nivel sin problema.
 
-El contador \texttt{input\_cnt\_r} es un bus de múltiples bits y no se sincroniza bit
-a bit, sino que se utiliza una transferencia de tipo bundled-data. Cuando 
-\texttt{done\_in\_r} se activa, el contador deja de modificarse y permanece estable
+El contador \texttt{input\_cnt\_r} es un bus de múltiples bits y se optó por no 
+sincronizarlo bit a bit, sino que se utilizó una transferencia de tipo bundled-data. 
+Cuando \texttt{done\_in\_r} se activa, el contador deja de modificarse y permanece estable
 hasta el proximo inicio. De esta manera, \texttt{o\_done} funciona como flag de validez 
-de \texttt{o\_count}. La latencia del sincronizador dá  varios ciclos para que el dato 
+de \texttt{o\_count}. La latencia del sincronizador dá varios ciclos para que el dato 
 se estabilice antes de ser observado desde el dominio CPU.
 
 \subsection{Medición de un clock de 8 GHz}
@@ -848,20 +843,21 @@ generada por el hardware.
 \subsection{Arquitectura e interfaz}
 
 El bloque funciona de manera sincrónica al clock de CPU y presenta una interfaz
-simple formada por el address del registro texttt{i\_addr}, dato de escritura
+simple formada por el address del registro \texttt{i\_addr}, dato de escritura
 \texttt{i\_wdata}, request \texttt{i\_req} y tipo de operación
 \texttt{i\_is\_write}. Como respuesta, entrega el dato de lectura
 \texttt{o\_rdata} y la confirmación \texttt{o\_ack}.
 
 Internamente, la dirección selecciona el registro involucrado en la transacción.
-Los campos de configuración se almacenan en registros, mientras que los campos de
-estado se obtienen directamente de los módulos correspondientes.
+Los campos de configuración se almacenan en registros en el propio regmap, mientras 
+que los campos de estado y resultados se obtienen directamente de los módulos 
+correspondientes.
 
 La Figura~\ref{fig:regmap-rtl} muestra un esquema simplificado de la arquitectura.
 El dato de escritura se dirige al banco de registros seleccionado por
-\texttt{i\_addr}; para las lecturas, un multiplexor selecciona el valor que será
-registrado en \texttt{o\_rdata}. La señal \texttt{o\_ack} indica que la
-transacción fue atendida, en ambos casos por igual.
+\texttt{i\_addr}; mientras que para las lecturas, un demultiplexor selecciona 
+el valor que será registrado en \texttt{o\_rdata}. La señal \texttt{o\_ack} 
+indica que la transacción fue atendida, en ambos casos por igual.
 
 \begin{figure}[H]
     \centering
@@ -1211,7 +1207,7 @@ manera, el modo y el umbral de las DUs se configuran antes de \texttt{ARM}, y se
 registran en el dominio DSP cuando llega dicho pulso.
 
 El frecuencímetro resuelve internamente sus cruces de dominio. Pero se destaca 
-que el resultado de cuenta se transfiere como bundled-data tambipén, utilizando
+que el resultado de cuenta se transfiere como bundled-data también, utilizando
 \texttt{o\_done} como indicación de que el dato ya se encuentra estable.
 
 \subsubsection*{Transferencia de coeficientes del FIR}
@@ -1219,7 +1215,7 @@ que el resultado de cuenta se transfiere como bundled-data tambipén, utilizando
 Para cargar los coeficientes al filtro FIR, primero se deberán escribir 
 los diez coeficientes independientemente en el regmap, donde se guardarán en los 
 llamados registros \emph{shadow}. Una escritura del bit \texttt{COMMIT} activará la 
-transacción utilizando el bloque\texttt{coeff\_handshake} y poniendo el bit 
+transacción utilizando el bloque \texttt{coeff\_handshake} y poniendo el bit 
 \texttt{BUSY} en alto. Durante este periodo, no se podrá modificar el valor de los 
 coeficientes en el regmap, ya que se estarán registrando en el dominio de DSP.
 Una vez que se termina la transacción, se libera \texttt{BUSY} y ahora los coeficientes
@@ -1237,9 +1233,10 @@ PRBS en una muestra con signo de dos bits. El bit uno se representa mediante
 $+1$, mientras que el bit cero se representa mediante $-1$. Las cuatro muestras
 resultantes ingresan simultáneamente al FIR paralelo.
 
-Las cuatro salidas del FIR se comparan con un valor umbral común, que fue registrado
-en el dominio de DSP al momento del armado de la DU. Si al menos una de ellas resulta 
-mayor o igual que el umbral, se genera un único trigger compartido para las cuatro DUs:
+Por otro lado, las cuatro salidas del FIR se comparan con un valor umbral común, que fue
+previamente registrado en el dominio de DSP al momento del armado de la DU. Si al menos 
+una de ellas resulta mayor o igual que el umbral, se genera un único trigger compartido 
+para las cuatro DUs:
 
 \begin{equation}
     \texttt{du\_trigger\_dsp} =
@@ -1248,12 +1245,12 @@ mayor o igual que el umbral, se genera un único trigger compartido para las cua
     \texttt{du\_threshold\_dsp}\right).
 \end{equation}
 
-Esto permite que las cuatro lanes comiencen su captura al mismo tiempo. Para la lectura, 
-\texttt{DU\_SELECT} habilita únicamente la memoria de la DU elegida mediante el regmap, 
-que controla un multiplexor que devuelve al mismo su muestra, su señal \texttt{RD\_VALID} 
-y su puntero final. Se optó hacerlo de esta forma para reducir tamaño de buses ya que 
-podrían generar una gran congestión. En cambio, las cuatro señales \texttt{DONE} se 
-conservan por separado para informar el estado completo de la captura.
+Esto permite que las cuatro lanes comiencen su captura al mismo tiempo. Para la lectura 
+de cada DU,  \texttt{du\_select\_lane} habilita las salidas correspondientes a cada lane: 
+\texttt{o\_ptr}, \texttt{o\_data} y \texttt{o\_rd\_valid}. Se optó hacerlo de esta 
+forma para reducir tamaño de buses ya que podrían generar una gran congestión. En cambio, 
+las cuatro señales \texttt{o\_done\_lane} se conservan por separado para informar el estado 
+completo de la captura.
 
 \subsection{Verificación}
 
@@ -1263,7 +1260,7 @@ La secuencia genera las transacciones de configuración y lectura; el driver las
 convierte en accesos al bus del \texttt{regmap}; el monitor observa pasivamente 
 las operaciones completadas; y el scoreboard comprueba que los estados y 
 resultados obtenidos sean coherentes con la secuencia ejecutada. La comunicación 
-entre estos componentes se implementó mediante mailboxes y una interfaz virtual.
+entre estos componentes se implementó mediante mailboxes e interfaces virtuales.
 
 \begin{figure}[H]
     \centering
@@ -1280,14 +1277,14 @@ se configura la DU en modo POST con umbral cero y se programa la ventana del
 frecuencímetro. Antes de iniciar el procesamiento, se leen nuevamente los
 registros para comprobar su configuración.
 
-En primer lugar, se hace la medición del clock de 1~GHz con el de200~MHz, y se
+En primer lugar, se hace la medición del clock de 1~GHz con el de 200~MHz, y se
 comprueba que el resultado esté dentro del rango deseado. Luego se inicia la
 PRBS, se verifica su estado \texttt{RUNNING} en alto, se habilita el FIR y se arman las
 cuatro DUs. Una vez que las cuatro indican \texttt{DONE}, se selecciona cada lane
 por separado y se leen su puntero y las 256 posiciones de memoria. El scoreboard
-comprueba que no existan valores desconocidos, que se hayan leído las 256 muestras
-de cada DU y que las mismas no estén vacias. Para terminar, se detiene la PRBS, se verifica 
-la desactivación de \texttt{RUNNING} y se deshabilita el filtro.
+comprueba que se hayan escrito la 4 DU por completo y que no contengan solo ceros. 
+Para terminar, se detiene la PRBS, se verifica la desactivación de \texttt{RUNNING} y 
+se deshabilita el filtro.
 
 \subsection{Resultados de síntesis}
 \label{subsec:top-sintesis}
@@ -1301,9 +1298,19 @@ dominan el costo del diseño.
 El diseño cumple las restricciones de timing para ambos clocks, de 200~MHz y
 1~GHz.
 
+El critical path pertenece al dominio del clock más rápido, de 1~GHz, y queda
+identificado por los siguientes puntos:
+
+\begin{itemize}
+    \item \textbf{Startpoint:} \texttt{u\_fir\_parallel/o\_data\_reg}.
+    \item \textbf{Endpoint:} \texttt{clock\_gate\_gen\_du\_lane}.
+\end{itemize}
+
+Siendo su WNS:
+
 \begin{table}[H]
     \centering
-    \caption{Resultado de timing del top.}
+    \caption{WNS del top}
     \label{tab:top-slack}
     \begin{tabular}{@{}lll@{}}
         \toprule
@@ -1317,16 +1324,9 @@ El diseño cumple las restricciones de timing para ambos clocks, de 200~MHz y
     \end{tabular}
 \end{table}
 
-El critical path pertenece al dominio del clock más rápido, de 1~GHz, y queda
-identificado por los siguientes puntos:
-
-\begin{itemize}
-    \item \textbf{Startpoint:} \texttt{u\_fir\_parallel/o\_data\_reg}.
-    \item \textbf{Endpoint:} \texttt{clock\_gate\_gen\_du\_lane}.
-\end{itemize}
-
 Por lo tanto, el camino crítico comienza en los registros de salida del filtro
-FIR y finaliza en la lógica de clock gating, probablemente asociado a \texttt{w\_en}.
+FIR y finaliza en la lógica de clock gating, probablemente asociado a \texttt{w\_en}
+del modulo DU.
 
 \subsubsection*{Área}
 
@@ -1410,7 +1410,7 @@ satisfactorios: el diseño cumple las restricciones de timing para los clocks de
 1~GHz y 200~MHz, con valores de área y potencia razonables para los distintos 
 bloques del sistema. El área se encuentra dominada por las cuatro DUs debido a 
 sus memorias, mientras que la potencia total estimada es de 1,75~mW. Por otro 
-lado, resulta llamativa la elevada proporción de celdas HVT. Esto podría indicar 
+lado, resulta llamativa la elevada proporción de celdas HVT, pudiendo indicar 
 que existe margen para cerrar timing a frecuencias mayores, aunque evaluar ese 
 límite no forma parte del objetivo de este trabajo.
 
