@@ -1,0 +1,3 @@
+rtl/fir_pkg.sv
+rtl/fir.sv
+rtl/sat_trunc.sv
