@@ -1,0 +1,5 @@
+rtl/fir_sop_pkg.sv
+rtl/fir_par_pkg.sv
+rtl/sat_trunc.sv
+rtl/fir_sop.sv
+rtl/fir_par.sv
