@@ -1,0 +1,5 @@
+rtl/interp_zeros/fir/fir_pkg.sv
+rtl/interp_zeros/interp_zeros_pkg.sv
+rtl/interp_zeros/fir/sat_trunc.sv
+rtl/interp_zeros/fir/fir.sv
+rtl/interp_zeros/interp_zeros.sv

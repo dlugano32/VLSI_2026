@@ -1,0 +1,5 @@
+rtl/interp_poly/fir/fir_pkg.sv
+rtl/interp_poly/interp_poly_pkg.sv
+rtl/interp_poly/fir/sat_trunc.sv
+rtl/interp_poly/fir/fir.sv
+rtl/interp_poly/interp_poly.sv
