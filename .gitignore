@@ -53,3 +53,5 @@
 #Python files
 !*.py
 !*.ipynb
+
+docs/*
