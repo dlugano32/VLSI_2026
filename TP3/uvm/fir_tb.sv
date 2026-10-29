@@ -11,16 +11,16 @@ module fir_tb;
 
     fir_if vif (clk);
 
-    // interp_zeros dut (
-    //     .i_clk   (clk),
-    //     .i_rst   (vif.i_rst),
-    //     .i_valid (vif.i_valid),
-    //     .i_data  (vif.i_data),
-    //     .o_valid (vif.o_valid),
-    //     .o_data  (vif.o_data)
-    // );
+//    interp_zeros u_interp_zeros (
+//        .i_clk   (clk),
+//        .i_rst   (vif.i_rst),
+//        .i_valid (vif.i_valid),
+//        .i_data  (vif.i_data),
+//        .o_valid (vif.o_valid),
+//        .o_data  (vif.o_data)
+//    );
 
-    interp_poly dut (
+    interp_poly u_interp_poly (
         .i_clk   (clk),
         .i_rst   (vif.i_rst),
         .i_valid (vif.i_valid),
@@ -30,6 +30,15 @@ module fir_tb;
     );
 
     fir_program u_tb (.vif(vif), .clk(clk));
+
+    //! El fsdb genera las waves de GLS con los SDF
+    initial begin
+       $fsdbDumpfile("gls/waves/interp_poly_gls.fsdb");
+       $fsdbDumpvars(0, fir_tb);
+    end
+
+    // Solo en el testbench de GLS: anotar los retardos del SDF
+    initial $sdf_annotate("syn/outputs/interp_poly.sdf", u_interp_poly, , , "MAXIMUM");
 
 endmodule
 

@@ -10,7 +10,7 @@ interface fir_if
     logic  o_valid;
     data_t o_data;
 
-    clocking cb_drv @(posedge clk);
+    clocking cb_drv @(negedge clk);
         default input #1step output #0;
         output i_valid, i_data;
         input  o_valid, o_data;

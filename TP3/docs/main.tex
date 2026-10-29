@@ -1,0 +1,771 @@
+\documentclass[10pt,a4paper]{article}
+
+% ---------------------------------------------------------------------------
+% Paquetes
+% ---------------------------------------------------------------------------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-nodecimaldot]{babel}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage[hidelinks]{hyperref}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    columns=fullflexible,
+    frame=single,
+    keepspaces=true,
+    showstringspaces=false,
+    breaklines=true
+}
+
+\graphicspath{
+    {pics/}
+    {../../TP2/top/informe/pics/}
+}
+
+% Marcas para resultados y figuras que se incorporarán en etapas posteriores.
+\newcommand{\pendiente}[1]{\textit{[Completar: #1]}}
+\newcommand{\figpendiente}[2]{%
+    \begin{figure}[H]
+        \centering
+        \fbox{\parbox[c][4.2cm][c]{0.86\linewidth}{\centering #1}}
+        \caption{#2}
+    \end{figure}
+}
+
+% ---------------------------------------------------------------------------
+% Documento
+% ---------------------------------------------------------------------------
+\begin{document}
+
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+\centering
+
+\includegraphics[width=0.55\textwidth]{fulgor.png}
+
+{\Huge\bfseries Trabajo Práctico N.\textsuperscript{o} 3\par}
+\vspace{0.5cm}
+{\LARGE Estimación y reducción de potencia en un interpolador FIR\par}
+\vspace{0.4cm}
+{\large Inserción de ceros frente a descomposición polifásica\par}
+\vspace{1.5cm}
+{\Large Curso de Diseño Digital VLSI -- Fundación Fulgor\par}
+\vfill
+
+{\Large Damián Lugano\par}
+\vspace{0.5cm}
+{\large \today\par}
+
+\end{titlepage}
+
+\hypersetup{pageanchor=true}
+\pagenumbering{roman}
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+
+% ---------------------------------------------------------------------------
+\section{Introducción}
+\label{sec:introduccion}
+% ---------------------------------------------------------------------------
+
+\subsection{Objetivos}
+
+El objetivo de este trabajo es implementar dos arquitecturas RTL de un mismo
+interpolador FIR y comparar su consumo de potencia. La primera arquitectura eleva
+la tasa de muestreo mediante la inserción explícita de ceros y procesa la secuencia
+resultante con un FIR convencional. La segunda utiliza una descomposición
+polifásica para evitar las multiplicaciones cuyos operandos se conocen nulos.
+
+Ambas implementaciones deben producir exactamente la misma secuencia de salida.
+Esta equivalencia funcional es una condición necesaria para que las diferencias
+posteriores de potencia, área y timing puedan atribuirse a la arquitectura y no a
+una diferencia en el procesamiento numérico.
+
+Además de medir el consumo total, se busca comprender qué estructuras lo originan,
+separar las componentes dinámica y estática, observar el efecto de los glitches y
+evaluar técnicas de reducción de potencia sin perder equivalencia funcional ni
+incumplir las restricciones de timing.
+
+\subsection{Ejercicios solicitados}
+
+El trabajo se organiza en los siguientes ejercicios:
+
+\begin{enumerate}
+    \item \textbf{Implementación, verificación y cierre de timing.} Desarrollar el
+    modelo fixed-point, implementar ambas arquitecturas, demostrar su equivalencia
+    y determinar un período de trabajo común.
+
+    \item \textbf{Anatomía del consumo.} Separar potencia de switching, potencia
+    interna y leakage, e identificar los bloques que dominan el consumo.
+
+    \item \textbf{Glitches.} Comparar la actividad espuria de las arquitecturas
+    mediante simulaciones de compuertas con y sin retardos anotados.
+
+    \item \textbf{Data gating.} Reducir la actividad de la arquitectura directa
+    evitando la conmutación de operaciones cuyo resultado se conoce de antemano.
+
+    \item \textbf{Clock gating.} Detener selectivamente el clock de registros que
+    no necesitan actualizarse y cuantificar el ahorro obtenido.
+
+    \item \textbf{Multi-$V_t$.} Evaluar el compromiso entre timing y leakage al
+    utilizar celdas con distintas tensiones de umbral.
+
+    \item \textbf{Arquitecturas opcionales.} Analizar el compromiso entre hardware
+    compartido, paralelismo y aprovechamiento de la simetría de los coeficientes.
+\end{enumerate}
+
+% ---------------------------------------------------------------------------
+\section{Marco teórico}
+\label{sec:marco-teorico}
+% ---------------------------------------------------------------------------
+
+\subsection{Interpolación mediante inserción de ceros}
+
+Para elevar la tasa de muestreo por un factor entero $L$, se construye una
+secuencia $x_u[n]$ que intercala $L-1$ ceros entre muestras consecutivas:
+
+\begin{equation}
+x_u[n]=
+\begin{cases}
+x[n/L], & n \equiv 0 \pmod L,\\
+0,      & \text{en otro caso}.
+\end{cases}
+\label{eq:upsampling}
+\end{equation}
+
+La secuencia interpolada se obtiene filtrando $x_u[n]$ con el filtro prototipo de
+$N$ taps:
+
+\begin{equation}
+y[n]=\sum_{k=0}^{N-1}h[k]x_u[n-k].
+\label{eq:fir-directo}
+\end{equation}
+
+El FIR directo trabaja a la tasa alta $L f_s$ y evalúa sus $N$ productos para cada
+muestra de salida. Sin embargo, debido a los ceros insertados, solamente $N/L$ de
+los datos almacenados son distintos de cero en cada fase.
+
+\subsection{Descomposición polifásica}
+
+Escribiendo el índice de salida como $n=mL+p$, donde $p$ identifica la fase, la
+ecuación anterior puede reorganizarse como
+
+\begin{equation}
+y[mL+p]=\sum_{r=0}^{N/L-1}h[rL+p]x[m-r].
+\label{eq:polyphase}
+\end{equation}
+
+Se define entonces un subfiltro por fase,
+
+\begin{equation}
+E_p[r]=h[rL+p], \qquad p=0,\ldots,L-1.
+\label{eq:phase-coefficients}
+\end{equation}
+
+Cada subfiltro posee $N/L=4$ taps y procesa únicamente las muestras originales a
+la tasa $f_s$. Las cuatro respuestas se calculan en paralelo y un selector entrega
+una fase por ciclo del clock de salida.
+
+La cantidad de multiplicaciones por segundo de ambas organizaciones es
+
+\begin{equation}
+R_{\mathrm{directa}}=NLf_s,
+\qquad
+R_{\mathrm{poli}}=\frac{N}{L}Lf_s=Nf_s.
+\label{eq:operation-rates}
+\end{equation}
+
+Por lo tanto, el ahorro aritmético teórico de la forma polifásica es un factor $L$.
+Este factor no se traduce necesariamente de forma directa a potencia total, ya que
+también intervienen la red de clock, los registros, la lógica de control y el área.
+
+\subsection{Componentes de la potencia}
+
+La potencia total de un circuito CMOS se separa en
+
+\begin{equation}
+P_{\mathrm{total}}=P_{\mathrm{switching}}+P_{\mathrm{internal}}+P_{\mathrm{leakage}}.
+\label{eq:power-components}
+\end{equation}
+
+La potencia de switching corresponde a la energía necesaria para cargar y descargar
+las capacidades de las interconexiones y entradas de las celdas. Una aproximación
+habitual es
+
+\begin{equation}
+P_{\mathrm{switching}}=\alpha C_L V_{DD}^{2}f_{\mathrm{clk}},
+\label{eq:switching-power}
+\end{equation}
+
+donde $\alpha$ representa la actividad de conmutación. La potencia interna se
+disipa dentro de las celdas debido a la carga de nodos internos y a la conducción
+simultánea de transistores durante las transiciones. Ambas forman la potencia
+dinámica y dependen de la actividad, la frecuencia, los slews y las cargas.
+
+La potencia de leakage está presente incluso cuando el circuito no conmuta. Depende
+del tipo de celda, su estado lógico, la tensión de alimentación y la temperatura, y
+crece con el área implementada. Para comparar diseños que realizan distinto trabajo
+por ciclo se utiliza también la energía por muestra de salida:
+
+\begin{equation}
+E_{\mathrm{muestra}}=\frac{P_{\mathrm{total}}}{Lf_s}.
+\label{eq:energy-per-sample}
+\end{equation}
+
+\subsection{Glitches y actividad real}
+
+Los glitches son transiciones espurias producidas cuando señales que convergen en
+una compuerta llegan con retardos diferentes. Son frecuentes en multiplicadores y
+árboles de sumadores, donde existen numerosos caminos combinacionales de distinta
+profundidad. Para que un glitch aparezca deben existir convergencia de señales,
+desbalance de tiempos de llegada, sensibilización lógica y un pulso suficientemente
+largo para superar el filtrado inercial.
+
+Una simulación RTL sin retardos no permite observar este fenómeno. Por ese motivo,
+las estimaciones de potencia principales se realizarán con actividad obtenida de una
+simulación de compuertas con SDF. El estímulo utilizado también resulta determinante:
+comparar arquitecturas exige aplicar la misma secuencia y el mismo período de clock.
+
+% ---------------------------------------------------------------------------
+\section{Ejercicio 1: implementación, verificación y cierre de timing}
+\label{sec:ejercicio-1}
+% ---------------------------------------------------------------------------
+
+El objetivo del primer ejercicio es implementar las dos arquitecturas, demostrar
+que son funcionalmente equivalentes y preparar el flujo para determinar el período
+mínimo, realizar GLS y obtener la primera estimación de potencia.
+
+\subsection{Parámetros comunes}
+
+La Tabla~\ref{tab:parametros-comunes} resume los parámetros empleados por las dos
+arquitecturas.
+
+\begin{table}[H]
+    \centering
+    \caption{Parámetros comunes del interpolador.}
+    \label{tab:parametros-comunes}
+    \begin{tabular}{@{}ll@{}}
+        \toprule
+        \textbf{Parámetro} & \textbf{Valor} \\
+        \midrule
+        Factor de interpolación, $L$ & 4 \\
+        Cantidad de taps, $N$ & 16 \\
+        Formato de entrada & signed Q1.11, 12 bits \\
+        Formato de coeficientes & signed Q1.11, 12 bits \\
+        Formato de salida & signed Q1.11, 12 bits \\
+        Cantidad de muestras de entrada & 2000 \\
+        Cantidad de muestras de salida & 8015 \\
+        Tasa del clock & $L f_s$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Modelo de referencia en Python}
+\label{sec:modelo-referencia}
+
+\subsubsection*{Diseño y cuantización del filtro}
+
+El filtro prototipo se diseñó mediante \texttt{firwin}, utilizando una ventana de
+Hamming y una frecuencia de corte normalizada igual a $1/L$. Su ganancia se
+multiplicó por $L$ para compensar la reducción de amplitud introducida por la
+inserción de ceros. Los coeficientes se redondearon al formato signed Q1.11.
+
+Los coeficientes enteros resultantes son
+
+\begin{equation}
+\begin{split}
+h={}&[-11,-44,-101,-88,167,740,1462,1971,\\
+     &\phantom{[}1971,1462,740,167,-88,-101,-44,-11].
+\end{split}
+\label{eq:quantized-coefficients}
+\end{equation}
+
+La distribución de estos coeficientes entre las cuatro fases se muestra en la
+Tabla~\ref{tab:coeficientes-fases}.
+
+\begin{table}[H]
+    \centering
+    \caption{Coeficientes enteros Q1.11 de los subfiltros polifásicos.}
+    \label{tab:coeficientes-fases}
+    \begin{tabular}{@{}crrrr@{}}
+        \toprule
+        \textbf{Fase} & $E_p[0]$ & $E_p[1]$ & $E_p[2]$ & $E_p[3]$ \\
+        \midrule
+        0 & $-11$  & 167  & 1971 & $-88$  \\
+        1 & $-44$  & 740  & 1462 & $-101$ \\
+        2 & $-101$ & 1462 & 740  & $-44$  \\
+        3 & $-88$  & 1971 & 167  & $-11$  \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.88\linewidth]{filter_impulse_response.png}
+    \caption{Respuesta impulsional del filtro prototipo antes y después de la
+    cuantización.}
+    \label{fig:filter-impulse-response}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.88\linewidth]{filter_frequency_response.png}
+    \caption{Respuesta en frecuencia del filtro pasabajos anti-imagen.}
+    \label{fig:filter-frequency-response}
+\end{figure}
+
+\subsubsection*{Aritmética de punto fijo}
+
+Las muestras y los coeficientes se representan con 12 bits y 11 bits
+fraccionarios. Cada multiplicación genera un producto signed de 24 bits con 22
+bits fraccionarios, que luego serán los operandos del arbol de sumas, al cual 
+se dejará desarrollar su resolución completa.
+
+\begin{table}[H]
+    \centering
+    \caption{Formatos internos utilizados por el RTL.}
+    \label{tab:formatos-internos}
+    \begin{tabular}{@{}lcc@{}}
+        \toprule
+        \textbf{Magnitud} & \textbf{Bits totales} & \textbf{Bits fraccionarios} \\
+        \midrule
+        Entrada y coeficiente & 12 & 11 \\
+        Producto & 24 & 22 \\
+        Acumulador directo, 16 taps & 28 & 22 \\
+        Acumulador por fase, 4 taps & 26 & 22 \\
+        Salida & 12 & 11 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+La conversión a la salida trunca los bits fraccionarios menos significativos y
+satura cuando la magnitud excede el rango signed de 12 bits.
+
+\subsubsection*{Estímulo de entrada común}
+
+El estímulo está compuesto por dos tonos, ruido blanco de baja amplitud y una
+normalización del pico a $-6\,\mathrm{dBFS}$:
+
+\begin{equation}
+x[n]=\sin(2\pi\,0.073n)
+    +0.63\sin(2\pi\,0.181n+0.37)
+    +0.04w[n].
+\label{eq:stimulus}
+\end{equation}
+
+Se emplea una semilla fija para el rng y luego se cuantiza la señal a Q1.11. De
+esta manera el estímulo es reproducible y puede reutilizarse sin modificaciones
+en las simulaciones RTL, GLS y en todas las estimaciones de potencia.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.88\linewidth]{input_signal.png}
+    \caption{Señal de entrada utilizada como estímulo común.}
+    \label{fig:input-signal}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.88\linewidth]{input_spectrum.png}
+    \caption{Espectro del estímulo común.}
+    \label{fig:input-spectrum}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.88\linewidth]{interpolator_output.png}
+    \caption{Salida fixed-point del interpolador.}
+    \label{fig:interpolator-output}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.88\linewidth]{output_spectrum_and_error.png}
+    \caption{Espectro de salida y error muestra a muestra entre los dos modelos.}
+    \label{fig:output-spectrum-error}
+\end{figure}
+
+\subsubsection*{Equivalencia de los modelos}
+
+El modelo implementa por separado la interpolación mediante inserción de ceros y
+la forma polifásica de la Ecuación~\ref{eq:polyphase}. Ambas rutas utilizan los
+mismos coeficientes cuantizados y la misma aritmética de punto fijo. La comparación
+muestra a muestra confirmó que las dos generan exactamente la misma secuencia, sin
+diferencias de cuantización.
+
+Para 2000 muestras de entrada, el archivo de referencia contiene 8015 muestras de
+salida. Esta longitud incluye la respuesta transitoria final de la convolución y
+los ceros necesarios para conservar la misma convención en las dos formas del
+modelo.
+
+% ---------------------------------------------------------------------------
+\subsection{Implementaciones RTL}
+\label{sec:rtl}
+% ---------------------------------------------------------------------------
+
+\subsubsection*{Interfaz común}
+
+Las dos arquitecturas exponen la misma interfaz. El único clock trabaja a la tasa
+$L f_s$ y \texttt{i\_valid} indica la llegada de una muestra nueva a $f_s$, por lo
+que permanece alto un ciclo de cada cuatro. Después de completar la latencia
+inicial, \texttt{o\_valid} acompaña una muestra de salida en todos los ciclos.
+
+La interfaz RTL común se declara de la siguiente forma. En
+\texttt{interp\_poly} solamente cambian el nombre del módulo y el paquete propio
+importado; la lista de puertos es idéntica.
+
+\begin{lstlisting}[language=Verilog,caption={Interfaz RTL común de los interpoladores.},label={lst:interfaz}]
+module interp
+    import interp_pkg::*;
+    import fir_pkg::*;
+(
+    input  logic  i_clk,    // Clock a L*f_s
+    input  logic  i_rst,    // Reset asincronico activo en alto
+    input  logic  i_valid,  // Muestra nueva, un ciclo de cada L
+    input  data_t i_data,   // Muestra signed Q1.11
+
+    output logic  o_valid,  // Indica una salida valida
+    output data_t o_data    // Resultado signed Q1.11
+);
+\end{lstlisting}
+
+\subsubsection*{FIR compartido}
+
+Ambas implementaciones reutilizan el mismo módulo \texttt{fir.sv} ya que, a fin 
+de cuentas, se trata conceptualmente del mismo filtro. Sin embargo, cada variante
+posee un paquete propio que determina la cantidad de taps y, por lo tanto, los
+tipos de los buses internos y el ancho del acumulador. En el modulo FIR se encuentra 
+el shift register, los productos parciales, la suma con precisión completa y el 
+bloque común de truncamiento y saturación.
+
+En la implementación directa el paquete configura 16 taps. En la polifásica se
+utilizan cuatro instancias del mismo RTL, cada una configurada con 4 taps y
+con los coeficientes de una fase diferente.
+
+\figpendiente{Insertar captura del esquemático RTL de \texttt{fir}.}
+{Arquitectura RTL del filtro FIR genérico.}
+
+\subsubsection*{Interpolador mediante inserción de ceros}
+
+La arquitectura \texttt{interp\_zeros} sustituye \texttt{i\_data} por cero durante
+los ciclos en los que \texttt{i\_valid} está inactivo. El FIR permanece habilitado
+en todos los ciclos y, por lo tanto, su línea de retardo contiene explícitamente
+los tres ceros insertados entre muestras consecutivas.
+
+La primera entrada válida se incorpora a la línea de retardo en el ciclo en el que
+se recibe. El registro de salida del FIR captura el primer resultado en el ciclo
+siguiente, por lo que la latencia de la arquitectura es de un ciclo del clock de
+alta tasa. A partir de ese momento se produce una salida válida por ciclo.
+
+\figpendiente{Insertar captura del esquemático RTL de \texttt{interp\_zeros}.}
+{Arquitectura RTL del interpolador mediante inserción de ceros.}
+
+\subsubsection*{Interpolador polifásico}
+
+La arquitectura \texttt{interp\_poly} instancia cuatro FIR de cuatro taps. Todos
+reciben la misma muestra de entrada y avanzan simultáneamente cuando
+\texttt{i\_valid} está activo. Como este pulso aparece una vez cada cuatro ciclos,
+cada subfiltro trabaja efectivamente a la tasa $f_s$. Sus salidas registradas se
+entregan mediante un selector que recorre las fases 0, 1, 2 y 3.
+
+El FIR actualiza el resultado correspondiente a una muestra en el siguiente evento
+de habilitación. Como estos eventos están separados por cuatro clocks, la primera
+salida de la arquitectura polifásica aparece cuatro ciclos después de aceptar la
+primera entrada. Luego el selector entrega una salida por ciclo sin interrupciones.
+
+\figpendiente{Insertar captura del esquemático RTL de \texttt{interp\_poly}.}
+{Arquitectura RTL del interpolador polifásico.}
+
+\subsubsection*{Latencia y alineación}
+
+La Tabla~\ref{tab:latencias} resume las latencias observadas desde el primer
+\texttt{i\_valid}. La diferencia de tres ciclos no modifica la secuencia numérica y
+se resuelve en la verificación utilizando \texttt{o\_valid}, sin introducir una
+compensación específica para cada DUT.
+
+\begin{table}[H]
+    \centering
+    \caption{Latencia de las implementaciones RTL actuales.}
+    \label{tab:latencias}
+    \begin{tabular}{@{}lcc@{}}
+        \toprule
+        \textbf{Arquitectura} & \textbf{Primera salida válida} & \textbf{Latencia} \\
+        \midrule
+        \texttt{interp\_zeros} & Ciclo 1 & 1 clock de $L f_s$ \\
+        \texttt{interp\_poly}  & Ciclo 4 & 4 clocks de $L f_s$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Conteo de multiplicaciones}
+
+Ambas descripciones RTL contienen 16 multiplicadores, uno por tap en el FIR
+directo y cuatro por cada una de las cuatro fases en el polifásico. Sin embargo, 
+la diferencia está principalmente en la tasa de productos, el FIR directo hace 
+16 productos por cada salida a $L f_s$, aunque solamente cuatro operandos de 
+datos son distintos de cero. La arquitectura polifásica hace 16 productos en 
+paralelo una vez cada 4 ciclos, equivalentes a 4 productos por cada salida a 
+$L f_s$.
+
+\begin{table}[H]
+    \centering
+    \caption{Conteo estructural y actividad aritmética.}
+    \label{tab:multiplicaciones}
+    \begin{tabular}{@{}lccc@{}}
+        \toprule
+        \textbf{Arquitectura} & \textbf{Multiplicadores RTL} &
+        \textbf{Productos por salida} & \textbf{Tasa de productos} \\
+        \midrule
+        Inserción de ceros & 16 & 16 & $16L f_s=64f_s$ \\
+        Polifásica         & 16 & 4  & $4L f_s=16f_s$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Por lo tanto, la arquitectura polifásica reduce en un factor $L=4$ la cantidad de
+operaciones por unidad de tiempo. Este es un conteo de la descripción RTL; la
+implementación final de los productos con coeficientes constantes se verificará en
+los reportes de síntesis.
+
+% ---------------------------------------------------------------------------
+\subsection{Verificación RTL}
+\label{sec:verificacion-rtl}
+% ---------------------------------------------------------------------------
+
+\subsubsection*{Entorno de verificación común}
+
+Se adaptó un entorno basado en clases compuesto por generador, driver, monitor y
+scoreboard. El mismo testbench se utiliza para ambas arquitecturas; solamente cambia
+el módulo seleccionado durante la compilación.
+
+El generador lee las 2000 entradas cuantizadas exportadas por el modelo de Python.
+Cada muestra se aplica con \texttt{i\_valid} activo durante un ciclo y se insertan
+tres ciclos inactivos antes de la muestra siguiente. Al finalizar se envían muestras
+nulas adicionales, manteniendo el mismo protocolo, para vaciar las líneas de retardo.
+
+El monitor ignora la latencia particular del DUT y publica una muestra únicamente
+cuando \texttt{o\_valid} está activo. El scoreboard lee las 8015 palabras del archivo
+golden y las compara, informando frente a una eventual diferencia.
+
+\subsubsection*{Resultados}
+
+La simulación RTL de ambas implementaciones finalizó correctamente. Para cada DUT,
+el scoreboard comparó las 8015 muestras válidas contra el mismo archivo de referencia
+y no detectó diferencias. De esta forma se confirmó la equivalencia bit a bit entre
+\texttt{interp\_zeros}, \texttt{interp\_poly} y el modelo fixed-point de Python.
+
+La comparación comienza con la primera activación de \texttt{o\_valid}; por lo tanto,
+la diferencia de tres ciclos entre las latencias de los DUT no requiere modificar el
+estímulo ni mantener dos secuencias esperadas.
+
+\figpendiente{Insertar captura de ondas con \texttt{i\_valid}, \texttt{i\_data},
+\texttt{o\_valid} y \texttt{o\_data}; idealmente mostrar el inicio de ambas
+simulaciones para evidenciar sus latencias.}
+{Inicio de la simulación RTL y primera salida válida de cada arquitectura.}
+
+% ---------------------------------------------------------------------------
+\subsection{Barrido de síntesis y frecuencia máxima}
+\label{sec:barrido-timing}
+
+Se sintetizó cada arquitectura con períodos de clock decrecientes a partir de 1ns. 
+La Tabla~\ref{tab:barrido-timing} resume los reportes del escenario  \texttt{func\_slow}. 
+Se presentan el WNS y el TNS, junto con la cantidad de caminos en violación de setup.
+
+\begin{table}[H]
+    \centering
+    \caption{Barrido de síntesis.}
+    \label{tab:barrido-timing}
+    \small
+    \begin{tabular}{@{}lrrrrrr@{}}
+        \toprule
+        \textbf{Arquitectura} & $f$ [GHz] & $T$ [ns] &
+        WNS [ns] & TNS [ns] & $n_{\mathrm{path}}$ \\
+        \midrule
+        Inserción de ceros & 1  & 1.000 & $0.00$  & $0.00$  & 0 \\
+                          & 2   & 0.500 & $0.00$  & $0.00$  & 0 \\
+                          & 2.5 & 0.400 & $-0.00$ & $-0.00$ & 1 \\
+                          & 3   & 0.333 & $-0.00$ & $-0.00$ & 1 \\
+                          & 4   & 0.250 & $-0.00$ & $-0.00$ & 4 \\
+        \midrule
+        Polifásica        & 1   & 1.000 & $0.00$  & $0.00$  & 0 \\
+                          & 2   & 0.500 & $0.00$  & $0.00$  & 0 \\
+                          & 3   & 0.333 & $0.00$  & $0.00$  & 0 \\
+                          & 3.5 & 0.285 & $-0.00$ & $-0.00$ & 3 \\
+                          & 4   & 0.250 & $-0.00$ & $-0.00$ & 7 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Según los resultados obtenidos en los reportes del barrido de sintesis, las frecuencias
+máximas sin violaciones de timing para cada arquitectura son:
+
+\begin{equation}
+f_{\max,\mathrm{zeros}}\approx 2.5\,\mathrm{GHz},
+\qquad
+f_{\max,\mathrm{poly}}\approx 3\,\mathrm{GHz}.
+\label{eq:fmax-aproximadas}
+\end{equation}
+
+\subsubsection*{Caminos críticos}
+
+En \texttt{interp\_zeros}, el recorrido crítico predominante parte de un registro
+de la línea de retardos del FIR, atraviesa la lógica aritmética de los productos
+por coeficientes constantes, el arbol de sumas y termina en el registro de salida
+del FIR. En el reporte, el punto de partida exacto es \path{u_fir/data_r_reg} y
+el de llegada \path{u_fir/o_data_reg}.
+
+En \texttt{interp\_poly}, el camino crítico es el que conecta los registros
+de muestras con los registros de resultado de las fases. En el reporte,
+parte de \path{gen_phases.u_fir_phase/data_r_reg} y termina en
+\path{gen_phases.u_fir_phase/o_data_reg}. La división en subfiltros de cuatro 
+taps reduce la profundidad del arbol de sumas respecto del FIR directo de 16 
+taps. Esto permite alcanzar una frecuencia máxima mayor en el barrido realizado.
+
+
+\subsection{Frecuencia y período de trabajo comunes}
+\label{sec:periodo-comun}
+
+Se fija como frecuencia de trabajo en común la $f_{\mathrm{clk}}=2\,\mathrm{GHz}$,
+ya que deja un margen de aproximadamente 20\,\% respecto a la máxima frecuencia 
+para la cual la arquitectura directa cierra timing. Este margen se deja para 
+conservar espacio para las modificaciones posteriores y, al mismo tiempo, evitar 
+una síntesis  casi exclusivamente HVT como la observada a 1 GHz.
+
+La Tabla~\ref{tab:vt-trabajo} muestra que a 2 GHz ambas síntesis utilizan los cuatro
+tipos de celdas. Los porcentajes corresponden a cantidad de celdas, según
+\texttt{vt\_groups.rpt}.
+
+\begin{table}[H]
+    \centering
+    \caption{Distribución de celdas por tensión de umbral a la frecuencia común de 2 GHz.}
+    \label{tab:vt-trabajo}
+    \begin{tabular}{@{}lrrrr@{}}
+        \toprule
+        \textbf{Arquitectura} & HVT [\%] & RVT [\%] & LVT [\%] & SLVT [\%] \\
+        \midrule
+        Inserción de ceros & 69.80 & 1.41 & 20.08 & 8.71 \\
+        Polifásica        & 73.60 & 0.79 & 20.22 & 5.40 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+La presencia de celdas LVT y SLVT deja una oportunidad para estudiar el compromiso
+entre leakage y timing mediante multi-$V_t$ en el Ejercicio 6.
+
+% ---------------------------------------------------------------------------
+\subsection{Simulación a nivel de compuertas (GLS)}
+\label{sec:gls}
+
+En esta etapa se ejecutó la simulación a nivel de compuertas sobre ambas 
+arquitecturas con los retardos SDF anotados. En un primer momento, al ejecutar
+\texttt{make gls}, aparecieron las violaciones de ancho de pulso \texttt{\$width} 
+advertidas en la consigna, asociadas a los límites genéricos de los modelos de 
+librería.  Por ejemplo, en registros del FIR directo se informó un límite de 
+1000 ps frente a intervalos de 250 ps. A la frecuencia de trabajo de 2 GHz, 
+el período es de 500 ps y el semiperíodo nominal es de 250 ps, por lo que ese 
+límite de 1 ns se incumple aun con el clock previsto para el diseño.
+
+Estos mensajes se identificaron como falsas violaciones debidas al placeholder
+de ancho de pulso del modelo, por lo que no corresponden a violaciones de setup o
+hold del camino de datos.
+
+Luego se ejecutó \texttt{make gls-ntc}, que deshabilita los chequeos de timing
+mediante \texttt{+notimingcheck} y conserva los retardos SDF. Ambas arquitecturas
+completaron correctamente la simulación y la comparación bit a bit con el modelo
+de referencia. Estas corridas se utilizaron para obtener la actividad de potencia.
+
+% ---------------------------------------------------------------------------
+\subsection{Estimación de potencia con actividad de GLS}
+\label{sec:potencia-inicial}
+
+En esta etapa, se convirtió a SAIF la actividad obtenida de GLS con SDF y
+se ejecutó PrimeTime PX en modo de potencia promedio. La comparación utiliza el
+mismo estímulo y una frecuencia común de 2 GHz. El reporte de actividad confirmó
+una cobertura de anotación del 100\,\% en ambas arquitecturas.
+
+\begin{table}[H]
+    \centering
+    \caption{Potencia estimada con PrimeTime PX a 2 GHz y actividad de GLS con SDF.}
+    \label{tab:potencia-inicial}
+    \begin{tabular}{@{}lrrr@{}}
+        \toprule
+        \textbf{Magnitud} & \textbf{Inserción de ceros} & \textbf{Polifásica} &
+        \textbf{Reducción [\%]} \\
+        \midrule
+        Switching [mW]          & 4.516  & 2.351  & 47.9 \\
+        Internal [mW]           & 1.964  & 0.5207 & 73.5 \\
+        Leakage [$\mu$W]        & 17.68  & 14.24  & 19.5 \\
+        Potencia total [mW]     & 6.497  & 2.886  & 55.6 \\
+        Energía por salida [pJ] & 3.249  & 1.443  & 55.6 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\linewidth]{power_components.pdf}
+    \caption{Comparación de potencia por componente a 2 GHz con actividad de
+    GLS y retardos SDF.}
+    \label{fig:power-components}
+\end{figure}
+
+La energía por muestra se calculó dividiendo la potencia total por la tasa de
+salida, que coincide con la frecuencia de clock de 2 GHz. La arquitectura
+polifásica reduce la potencia total un 55.6\,\%, con una relación
+
+\begin{equation}
+\frac{P_{\mathrm{zeros}}}{P_{\mathrm{poly}}}
+=
+\frac{6.497}{2.886}
+\approx 2.25.
+\label{eq:relacion-potencias}
+\end{equation}
+
+Este factor es menor que el ahorro aritmético teórico $L=4$, ya que la potencia
+total también incluye el consumo de registros y de la distribución de clock.
+Además, la arquitectura polifásica incorpora lógica de selección y control de
+fases, cuyos consumos no escalan proporcionalmente con la cantidad de productos
+por muestra. La reducción relativa más marcada se observa en la potencia interna,
+del 73.5\,\%, mientras que la potencia de switching disminuye un 47.9\,\%. El
+leakage se reduce un 19.5\,\% y representa menos del 0.5\,\% de la potencia total
+en ambas variantes; por lo tanto, en estas condiciones domina la potencia dinámica.
+
+\begin{table}[H]
+    \centering
+    \caption{Desglose de potencia total por grupo a 2 GHz.}
+    \label{tab:potencia-grupos-inicial}
+    \begin{tabular}{@{}lrrr@{}}
+        \toprule
+        \textbf{Grupo} & \textbf{Zeros [mW]} & \textbf{Poly [mW]} &
+        \textbf{Cambio [\%]} \\
+        \midrule
+        Combinacional & 4.993  & 1.576  & $-68.4$ \\
+        Registros     & 0.8891 & 0.5678 & $-36.1$ \\
+        Red de clock  & 0.6148 & 0.7418 & $+20.7$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+En base al desglose de potencia por grupos, se puede observar que la lógica
+combinacional concentra el 76.85\,\% del consumo de \textit{zeros} y el
+54.61\,\% del de \textit{poly}. Su reducción de aproximadamente 3.417 mW explica
+la mayor parte del ahorro absoluto. Esto evidencia que la arquitectura polifásica
+genera un ahorro considerable al calcular únicamente los productos que
+efectivamente contribuyen a cada muestra de salida.
+
+Los registros también consumen menos en la arquitectura polifásica, aunque su
+reducción es menor. En cambio, la red de clock aumenta un 20.7\,\% en potencia
+absoluta y pasa de representar el 9.46\,\% al 25.71\,\% del total. Este incremento
+se debe a que la reorganización del procesamiento en fases modifica la estructura
+secuencial del circuito y aumenta la carga efectiva asociada al clock, aun cuando
+la lógica combinacional total se reduzca.
+
+\end{document}
