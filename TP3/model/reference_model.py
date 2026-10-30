@@ -1,287 +1,192 @@
-"""Modelo fixed-point de referencia para el interpolador del TP3.
+"""TP3, ejercicio 1a: remuestreador 4/3 directo y polifasico.
 
-La aritmetica de este archivo define el contrato que debe respetar el RTL:
-
-* muestras, coeficientes y salida: signed Q1.11 (12 bits);
-* productos: Q2.22 (24 bits), sin recorte intermedio;
-* acumulador: 28 bits, con cuatro bits de guarda;
-* salida: truncamiento por descarte de LSB y saturacion signed.
-
-Se implementan las dos formas del interpolador: insercion explicita de ceros y
-descomposicion polifasica. Ambas rutas usan la misma funcion MAC fixed-point.
+fir_model calcula una salida del FIR, como un arbol de multiplicadores y
+sumadores del RTL. Las otras dos funciones arman sus ventanas de entrada.
+Cada una devuelve las salidas y la memoria para la siguiente llamada.
+FixedPoint hace todas las multiplicaciones, sumas y el truncamiento/saturacion.
 """
 
-from dataclasses import dataclass
 from pathlib import Path
 import sys
-
 import numpy as np
 from scipy.signal import firwin
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
+sys.path.insert(0, str(REPO_ROOT))
 from utils.fixed_point import FixedPoint, FixedPointFormat
 
-
-@dataclass(frozen=True)
-class InterpolatorConfig:
-    """Parametros estructurales y formatos numericos del interpolador."""
-
-    interpolation: int = 4
-    taps: int = 16
-    nb_data:   int = 12
-    nbf_data:  int = 11
-    nb_coeff:  int = 12
-    nbf_coeff: int = 11
-
-    def __post_init__(self) -> None:
-        if self.interpolation <= 0:
-            raise ValueError("El factor de interpolacion debe ser positivo")
-        if self.taps <= 0 or self.taps % self.interpolation:
-            raise ValueError("La cantidad de taps debe ser multiplo de L")
-        if self.nb_data <= self.nbf_data:
-            raise ValueError("El formato de datos debe tener bit de signo")
-        if self.nb_coeff <= self.nbf_coeff:
-            raise ValueError("El formato de coeficientes debe tener bit de signo")
-
-    @property
-    def data_format(self) -> FixedPointFormat:
-        return FixedPointFormat(self.nb_data, self.nbf_data)
-
-    @property
-    def coefficient_format(self) -> FixedPointFormat:
-        return FixedPointFormat(self.nb_coeff, self.nbf_coeff)
-
-    @property
-    def output_format(self) -> FixedPointFormat:
-        return self.data_format
-
-    @property
-    def product_format(self) -> FixedPointFormat:
-        return FixedPointFormat(self.nb_data + self.nb_coeff, self.nbf_data + self.nbf_coeff)
-
-    @property
-    def guard_bits(self) -> int:
-        return int(np.ceil(np.log2(self.taps)))
-
-    @property
-    def accumulator_format(self) -> FixedPointFormat:
-        return FixedPointFormat( self.product_format.NB + self.guard_bits, self.product_format.NBF)
+# Equivalentes a los parameter/localparam del RTL.
+L = 4
+M = 3
+N = 64
+PIN = 90
+POUT = 120
+DATA_FORMAT = FixedPointFormat(12, 11)
+COEFF_FORMAT = FixedPointFormat(12, 11)
 
 
-def design_coefficients(
-    config: InterpolatorConfig,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Diseña y cuantiza el pasabajos anti-imagen.
-
-    ``firwin`` usa una frecuencia de Nyquist normalizada a uno. Por eso el
-    borde ideal para interpolacion por L es 1/L. Se usa ventana de Hamming y,
-    por defecto, ganancia DC igual a L para conservar la amplitud luego de
-    insertar L-1 ceros.
-
-    Returns
-    -------
-    h_float:
-        Coeficientes antes de cuantizar, incluyendo la compensacion de ganancia.
-    h_quantized:
-        Coeficientes cuantizados reconstruidos como ``float``.
-    h_integer:
-        Palabras signed Q1.11 que deben copiarse al RTL.
-    """
-    h_float = firwin(
-        config.taps,
-        cutoff=1.0 / config.interpolation,
-        window="hamming",
-        pass_zero="lowpass",
-        scale=True,
-        fs=2.0,
-    )
-        
-    h_float = h_float * config.interpolation
-
-    h_quantized, h_integer = config.coefficient_format.quantize(
-        h_float,
-        rounding="round",
-        overflow="raise",
-    )
+def design_coefficients():
+    h_float = firwin(N, 1 / max(L, M), window="hamming", fs=2.0) * L
+    h_quantized, h_integer = COEFF_FORMAT.quantize(h_float, rounding="round", overflow="raise")
     return h_float, h_quantized, h_integer.astype(np.int64)
 
 
-def generate_stimulus(
-    config: InterpolatorConfig,
-    sample_count: int = 2000,
-    seed: int = 42,
-) -> tuple[np.ndarray, np.ndarray]:
-    
-    """Genera el estimulo comun: dos tonos, ruido bajo y pico a -6 dBFS."""
-    if sample_count <= 0:
-        raise ValueError("sample_count debe ser positivo")
-
+def generate_stimulus(sample_count=2070, seed=42):
     rng = np.random.default_rng(seed)
-    n = np.arange(sample_count, dtype=float)
-
-    signal = (
-        np.sin(2.0 * np.pi * 0.073 * n)
-        + 0.63 * np.sin(2.0 * np.pi * 0.181 * n + 0.37)
-        + 0.04 * rng.standard_normal(sample_count)
-    )
-    target_peak = 10.0 ** (-6.0 / 20.0)
-    signal *= target_peak / np.max(np.abs(signal))
-
-    quantized, integer = config.data_format.quantize(
-        signal,
-        rounding="round",
-        overflow="raise",
-    )
+    n = np.arange(sample_count)
+    signal = (np.sin(2 * np.pi * 0.073 * n)
+              + 0.63 * np.sin(2 * np.pi * 0.181 * n + 0.37)
+              + 0.04 * rng.standard_normal(sample_count))
+    signal = signal * (10 ** (-6 / 20)) / np.max(np.abs(signal))
+    quantized, integer = DATA_FORMAT.quantize(signal, rounding="round", overflow="raise")
     return quantized, integer.astype(np.int64)
 
 
-def polyphase_coefficients(
-    coefficients: np.ndarray,
-    config: InterpolatorConfig,
-) -> np.ndarray:
-    """Separa h[k] en L fases: phases[p, r] = h[r*L + p]."""
-
-    coefficients = np.asarray(coefficients, dtype=np.int64)
-
-    return np.asarray(
-        [coefficients[phase::config.interpolation] for phase in range(config.interpolation)],
-        dtype=np.int64,
-    )
+def polyphase_coefficients(h):
+    phases = np.zeros((L, N // L), dtype=np.int64)
+    for phase in range(L):
+        for tap in range(N // L):
+            phases[phase, tap] = h[tap * L + phase]
+    return phases
 
 
-def fir_model(
-    i_data: np.ndarray,
-    i_taps: np.ndarray,
-    config: InterpolatorConfig,
-) -> np.ndarray:
-    """FIR fixed-point, con la misma aritmetica prevista para el RTL."""
+def fir_model(window, coefficients):
+    """UNA salida: window[0] es la muestra mas reciente, window[1] la anterior.
 
-    x = [
-        FixedPoint(value, config.data_format, from_int=True, overflow="raise")
-        for value in i_data
-    ]
-    
-    h = [
-        FixedPoint(value, config.coefficient_format, from_int=True, overflow="raise")
-        for value in i_taps
-    ]
+    Entradas y coeficientes son palabras enteras Q1.11 ya cuantizadas.
+    """
+    # Multiplicadores: productos completos de 24 bits y 22 bits fraccionales.
+    products = []
+    for tap in range(len(coefficients)):
+        x = FixedPoint(window[tap], DATA_FORMAT, from_int=True, overflow="raise")
+        h = FixedPoint(coefficients[tap], COEFF_FORMAT, from_int=True, overflow="raise")
+        products.append(x * h)
 
-    y = []
+    # Arbol de sumas. FixedPoint agrega un bit por nivel automaticamente.
+    # 64 productos -> 6 niveles -> 30 bits; 16 productos -> 4 niveles -> 28 bits.
+    while len(products) > 1:
+        next_level = []
+        for tap in range(0, len(products), 2):
+            next_level.append(products[tap] + products[tap + 1])
+        products = next_level
 
-    # Convolucion completa.
-    for n in range(len(x) + len(h) - 1):
-        acc = FixedPoint(
-            0,
-            config.accumulator_format,
-            from_int=True,
-            overflow="raise",
-        )
-
-        for k in range(len(h)):
-            x_idx = n - k
-
-            if 0 <= x_idx < len(x):
-                prod = x[x_idx] * h[k] # Producto full resolution
-                acc = acc + prod       # El acumulador tiene 4 bits de guarda
-
-        # Truncado y saturación a la resolución de salida
-        y_n = acc.resize(
-            config.output_format,
-            rounding="trunc",
-            overflow="saturate",
-        )
-        y.append(y_n.int_value)
-
-    return np.asarray(y, dtype=np.int64)
+    # Unico recorte: shift aritmetico de 11 bits y saturacion signed a 12 bits.
+    output = products[0].resize(DATA_FORMAT, rounding="trunc", overflow="saturate")
+    return output.int_value
 
 
-def interpolate_zeros_fixed(
-    samples: np.ndarray,
-    coefficients: np.ndarray,
-    config: InterpolatorConfig,
-) -> np.ndarray:
-    """Interpolador directo: inserta L-1 ceros y aplica el FIR completo."""
+def interp_zeros(samples, h, history=None):
+    """Directo: insertar ceros, FIR de 64 taps, conservar una de cada 3 salidas.
 
-    upsampled = np.zeros(len(samples) * config.interpolation, dtype=np.int64)
-    upsampled[::config.interpolation] = samples
+    history guarda las ultimas 63 muestras de tasa alta, en orden temporal.
+    Si no se entrega historia, se parte de reset. No se agrega la cola del FIR.
+    """
+    if len(samples) % M != 0:
+        raise ValueError("La cantidad de entradas debe ser multiplo de M")
+    if history is None:
+        history = np.zeros(N - 1, dtype=np.int64)
 
-    return fir_model(upsampled, coefficients, config)
+    # Regresor: primero la historia; despues [x0,0,0,0,x1,0,0,0,...].
+    regressor = np.zeros(N - 1 + len(samples) * L, dtype=np.int64)
+    for index in range(N - 1):
+        regressor[index] = history[index]
+    for index in range(len(samples)):
+        regressor[N - 1 + index * L] = samples[index]
 
+    output = np.zeros(len(samples) * L // M, dtype=np.int64)
+    for n in range(len(output)):
+        newest = N - 1 + n * M
+        window = np.zeros(N, dtype=np.int64)
+        for tap in range(N):
+            window[tap] = regressor[newest - tap]
+        output[n] = fir_model(window, h)
 
-def interpolate_polyphase_fixed(
-    samples: np.ndarray,
-    coefficients: np.ndarray,
-    config: InterpolatorConfig,
-) -> np.ndarray:
-    """Interpolador polifasico: filtra con h[p::L] y entrelaza las fases."""
-
-    phases = polyphase_coefficients(coefficients, config)
-    phase_outputs = []
-
-    for phase_coefficients in phases:
-        phase_outputs.append(
-            fir_model(samples, phase_coefficients, config)
-        )
-
-    # La convolucion directa incluye los L-1 ceros que quedan al final de la
-    # secuencia interpolada. Se conserva esa longitud para comparar ambas
-    # implementaciones muestra por muestra; las posiciones extra quedan en cero.
-    output_length = len(samples) * config.interpolation + len(coefficients) - 1
-    y = np.zeros(output_length, dtype=np.int64)
-
-    for phase, phase_output in enumerate(phase_outputs):
-        phase_indices = phase + config.interpolation * np.arange(len(phase_output))
-        valid = phase_indices < output_length
-        y[phase_indices[valid]] = phase_output[valid]
-
-    return y
+    # Registros que se conservan para el bloque siguiente.
+    next_history = regressor[-(N - 1):].copy()
+    return output, next_history
 
 
-def export_hex(path: Path, values: np.ndarray, fmt: FixedPointFormat) -> None:
-    """Exporta una palabra hexadecimal en complemento a dos por linea."""
+def interp_poly(samples, h, history=None):
+    """Polifasico: FIR de 16 taps con fase p=(3*n)%4 y muestra m=(3*n)//4.
 
+    history guarda las ultimas 15 entradas, en orden temporal.
+    La cantidad de entradas es multiplo de 3: cada llamada arranca en fase 0.
+    """
+    if len(samples) % M != 0:
+        raise ValueError("La cantidad de entradas debe ser multiplo de M")
+    taps = N // L
+    if history is None:
+        history = np.zeros(taps - 1, dtype=np.int64)
+    phases = polyphase_coefficients(h)
+
+    regressor = np.zeros(taps - 1 + len(samples), dtype=np.int64)
+    for index in range(taps - 1):
+        regressor[index] = history[index]
+    for index in range(len(samples)):
+        regressor[taps - 1 + index] = samples[index]
+
+    output = np.zeros(len(samples) * L // M, dtype=np.int64)
+    for n in range(len(output)):
+        m = (n * M) // L  # Cociente: muestra de entrada de referencia.
+        p = (n * M) % L   # Resto: fase 0,3,2,1,0,3,2,1,...
+        newest = taps - 1 + m
+        window = np.zeros(taps, dtype=np.int64)
+        for tap in range(taps):
+            window[tap] = regressor[newest - tap]
+        output[n] = fir_model(window, phases[p])
+
+    next_history = regressor[-(taps - 1):].copy()
+    return output, next_history
+
+
+def verify_blocks(samples, h, expected):
+    """Ejercicio 1a: bloques de 90 deben dar lo mismo que la secuencia completa."""
+    for resampler in (interp_zeros, interp_poly):
+        history = None
+        for start in range(0, len(samples), PIN):
+            block = samples[start:start + PIN]
+            output, history = resampler(block, h, history)
+            output_start = start * L // M
+            np.testing.assert_array_equal(output, expected[output_start:output_start + POUT])
+
+
+def export_hex(path, values, fmt):
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savetxt(path, fmt.to_hex(values), fmt="%s")
 
 
-def main() -> None:
+def export_vectors(samples, h, expected):
+    directory = Path(__file__).with_name("vectors")
+    phases = polyphase_coefficients(h)
+    export_hex(directory / "coefficients_q1_11.hex", h, COEFF_FORMAT)
+    export_hex(directory / "coefficients_polyphase_q1_11.hex", phases.flatten(), COEFF_FORMAT)
+    export_hex(directory / "stimulus_q1_11.hex", samples, DATA_FORMAT)
+    export_hex(directory / "expected_q1_11.hex", expected, DATA_FORMAT)
 
-    output_dir = Path(__file__).with_name("vectors")
-    config = InterpolatorConfig()
-
-    _, _, coefficients = design_coefficients(config)
-    phases = polyphase_coefficients(coefficients, config)
-    _, samples = generate_stimulus(config)
-    direct = interpolate_zeros_fixed(samples, coefficients, config)
-    polyphase = interpolate_polyphase_fixed(samples, coefficients, config)
-
-    if not np.array_equal(direct, polyphase):
-        mismatch = int(np.flatnonzero(direct != polyphase)[0])
-        raise AssertionError(f"Las arquitecturas difieren en la muestra {mismatch}")
-
-    paths = {
-        "coefficients": output_dir / "coefficients_q1_11.hex",
-        "polyphase_coefficients": output_dir / "coefficients_polyphase_q1_11.hex",
-        "stimulus": output_dir / "stimulus_q1_11.hex",
-        "expected": output_dir / "expected_q1_11.hex",
-    }
-    export_hex(paths["coefficients"], coefficients, config.coefficient_format)
-    export_hex(paths["polyphase_coefficients"], phases.reshape(-1), config.coefficient_format)
-    export_hex(paths["stimulus"], samples, config.data_format)
-    export_hex(paths["expected"], direct, config.output_format)
+    # Vectores adicionales para los ejercicios 4/5: el FIR no consume los huecos.
+    # Se mantienen los mismos archivos y semilla de la version anterior.
+    rng = np.random.default_rng(43)
+    blocks = samples.reshape(-1, PIN)
+    valid = rng.permutation(np.tile([True, False], len(blocks)))
+    data = rng.integers(-2048, 2048, size=(len(valid), PIN), dtype=np.int64)
+    block_index = 0
+    for cycle in range(len(valid)):
+        if valid[cycle]:
+            data[cycle] = blocks[block_index]
+            block_index = block_index + 1
+    export_hex(directory / "stimulus_gapped_q1_11.hex", data.flatten(), DATA_FORMAT)
+    np.savetxt(directory / "stimulus_gapped_valid.txt", valid.astype(int), fmt="%d")
 
 
-    print(f"L={config.interpolation}, N={config.taps}")
-    print(
-        "Formatos: "
-        f"entrada Q({config.data_format.NB},{config.data_format.NBF}), "
-        f"producto Q({config.product_format.NB},{config.product_format.NBF}), "
-        f"acumulador Q({config.accumulator_format.NB},{config.accumulator_format.NBF})"
-    )
-    print(f"Coeficientes enteros: {coefficients.tolist()}")
-    
+def main():
+    _, _, h = design_coefficients()
+    _, samples = generate_stimulus()
+    direct, _ = interp_zeros(samples, h)
+    polyphase, _ = interp_poly(samples, h)
+    np.testing.assert_array_equal(direct, polyphase)
+    verify_blocks(samples, h, direct)
+    export_vectors(samples, h, direct)
+    print(f"OK: {len(samples)} entradas -> {len(direct)} salidas; directo = polifasico = bloques")
+
 if __name__ == "__main__":
     main()

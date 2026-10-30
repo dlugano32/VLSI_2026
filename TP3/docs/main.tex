@@ -52,7 +52,7 @@
 
 {\Huge\bfseries Trabajo Práctico N.\textsuperscript{o} 3\par}
 \vspace{0.5cm}
-{\LARGE Estimación y reducción de potencia en un interpolador FIR\par}
+{\LARGE Estimación y reducción de potencia en un remuestreador FIR\par}
 \vspace{0.4cm}
 {\large Inserción de ceros frente a descomposición polifásica\par}
 \vspace{1.5cm}
@@ -79,10 +79,16 @@
 \subsection{Objetivos}
 
 El objetivo de este trabajo es implementar dos arquitecturas RTL de un mismo
-interpolador FIR y comparar su consumo de potencia. La primera arquitectura eleva
-la tasa de muestreo mediante la inserción explícita de ceros y procesa la secuencia
-resultante con un FIR convencional. La segunda utiliza una descomposición
-polifásica para evitar las multiplicaciones cuyos operandos se conocen nulos.
+remuestreador FIR de tasa $L/M=4/3$ y comparar su consumo de potencia. La primera
+arquitectura inserta tres ceros entre muestras consecutivas y aplica un FIR de
+64 taps, calculando únicamente las salidas que se conservan al diezmar por tres.
+La segunda utiliza cuatro fases de 16 taps para calcular esas mismas salidas
+directamente sobre las muestras originales.
+
+En cada ciclo válido ambas arquitecturas reciben 90 muestras y producen un bloque
+de 120 salidas, luego de su latencia de procesamiento. El FIR cumple las funciones
+de anti-imagen después de la interpolación y anti-aliasing antes del diezmado.
+El reloj trabaja a la tasa de bloques, $f_{\mathrm{clk}}=f_s/90$.
 
 Ambas implementaciones deben producir exactamente la misma secuencia de salida.
 Esta equivalencia funcional es una condición necesaria para que las diferencias
@@ -100,8 +106,9 @@ El trabajo se organiza en los siguientes ejercicios:
 
 \begin{enumerate}
     \item \textbf{Implementación, verificación y cierre de timing.} Desarrollar el
-    modelo fixed-point, implementar ambas arquitecturas, demostrar su equivalencia
-    y determinar un período de trabajo común.
+    modelo de punto fijo, verificar la equivalencia del remuestreo directo y
+    polifásico sobre la secuencia completa y en bloques de 90 entradas, implementar
+    ambas arquitecturas paralelas y determinar un período de trabajo común.
 
     \item \textbf{Anatomía del consumo.} Separar potencia de switching, potencia
     interna y leakage, e identificar los bloques que dominan el consumo.
@@ -110,16 +117,20 @@ El trabajo se organiza en los siguientes ejercicios:
     mediante simulaciones de compuertas con y sin retardos anotados.
 
     \item \textbf{Data gating.} Reducir la actividad de la arquitectura directa
-    evitando la conmutación de operaciones cuyo resultado se conoce de antemano.
+    aislando los operandos durante los ciclos sin bloque válido. Comparar el
+    forzado a cero con la retención del último bloque válido y estudiar la
+    actividad de los multiplicadores asociados al relleno.
 
     \item \textbf{Clock gating.} Detener selectivamente el clock de registros que
-    no necesitan actualizarse y cuantificar el ahorro obtenido.
+    no necesitan actualizarse durante los ciclos sin bloque válido y cuantificar
+    el ahorro para distintas fracciones de ciclos válidos.
 
     \item \textbf{Multi-$V_t$.} Evaluar el compromiso entre timing y leakage al
     utilizar celdas con distintas tensiones de umbral.
 
     \item \textbf{Arquitecturas opcionales.} Analizar el compromiso entre hardware
-    compartido, paralelismo y aprovechamiento de la simetría de los coeficientes.
+    compartido mediante plegado, paralelismo y aprovechamiento de la simetría
+    de los coeficientes.
 \end{enumerate}
 
 % ---------------------------------------------------------------------------
@@ -127,10 +138,12 @@ El trabajo se organiza en los siguientes ejercicios:
 \label{sec:marco-teorico}
 % ---------------------------------------------------------------------------
 
+
 \subsection{Interpolación mediante inserción de ceros}
 
-Para elevar la tasa de muestreo por un factor entero $L$, se construye una
-secuencia $x_u[n]$ que intercala $L-1$ ceros entre muestras consecutivas:
+La interpolación digital permite incrementar la tasa de muestreo de una
+señal discreta por un factor entero $L$. Para ello, se construye una
+secuencia $x_u[n]$ intercalando $L-1$ ceros entre muestras consecutivas:
 
 \begin{equation}
 x_u[n]=
@@ -141,51 +154,183 @@ x[n/L], & n \equiv 0 \pmod L,\\
 \label{eq:upsampling}
 \end{equation}
 
-La secuencia interpolada se obtiene filtrando $x_u[n]$ con el filtro prototipo de
-$N$ taps:
+La inserción de ceros aumenta la tasa de muestreo de $f_s$ a $Lf_s$,
+pero también introduce imágenes espectrales. Para eliminarlas, se
+aplica un filtro FIR pasabajos de $N$ coeficientes, cuya salida se
+calcula mediante la convolución
 
 \begin{equation}
-y[n]=\sum_{k=0}^{N-1}h[k]x_u[n-k].
+y_u[n]=\sum_{k=0}^{N-1}h[k]x_u[n-k].
 \label{eq:fir-directo}
 \end{equation}
 
-El FIR directo trabaja a la tasa alta $L f_s$ y evalúa sus $N$ productos para cada
-muestra de salida. Sin embargo, debido a los ceros insertados, solamente $N/L$ de
-los datos almacenados son distintos de cero en cada fase.
+En una implementación directa, cada muestra de salida requiere
+evaluar $N$ productos y acumular sus resultados. Sin embargo, cuando
+$N$ es múltiplo de $L$, solamente $N/L$ posiciones de la ventana de
+entrada corresponden a muestras originales. Las restantes $N-N/L$
+posiciones contienen ceros insertados.
+
+Por lo tanto, una proporción $(L-1)/L$ de los productos calculados
+tiene resultado nulo. Esta redundancia motiva el uso de estructuras
+polifásicas, que permiten reorganizar el filtrado y eliminar dichas
+operaciones sin modificar la respuesta del sistema.
 
 \subsection{Descomposición polifásica}
 
-Escribiendo el índice de salida como $n=mL+p$, donde $p$ identifica la fase, la
-ecuación anterior puede reorganizarse como
+La descomposición polifásica consiste en separar el filtro prototipo
+en $L$ subfiltros, agrupando los coeficientes según su posición
+módulo $L$.
+
+Considerando la ecuación~\eqref{eq:fir-directo}, se expresa el índice
+de salida a tasa alta como $n=mL+p$, donde $p$ identifica la fase.
+Debido a la inserción de ceros, únicamente contribuyen los términos
+cuyos índices cumplen $k \equiv p \pmod L$.
+
+Sustituyendo $k=rL+p$, se obtiene
 
 \begin{equation}
-y[mL+p]=\sum_{r=0}^{N/L-1}h[rL+p]x[m-r].
+y_u[mL+p]=
+\sum_{r=0}^{N/L-1}h[rL+p]x[m-r].
 \label{eq:polyphase}
 \end{equation}
 
-Se define entonces un subfiltro por fase,
+Se define entonces el conjunto de coeficientes correspondiente a
+cada fase:
 
 \begin{equation}
-E_p[r]=h[rL+p], \qquad p=0,\ldots,L-1.
+E_p[r]=h[rL+p],
+\qquad p=0,\ldots,L-1.
 \label{eq:phase-coefficients}
 \end{equation}
 
-Cada subfiltro posee $N/L=4$ taps y procesa únicamente las muestras originales a
-la tasa $f_s$. Las cuatro respuestas se calculan en paralelo y un selector entrega
-una fase por ciclo del clock de salida.
+De esta manera, el filtro original de $N$ coeficientes se reorganiza
+en $L$ subfiltros de $N/L$ coeficientes cada uno.
 
-La cantidad de multiplicaciones por segundo de ambas organizaciones es
+Para los parámetros del trabajo, $L=4$ y $N=64$, se obtienen cuatro
+fases de 16 coeficientes:
+
+\begin{align}
+E_0[r] &= h[4r], \nonumber\\
+E_1[r] &= h[4r+1], \nonumber\\
+E_2[r] &= h[4r+2], \nonumber\\
+E_3[r] &= h[4r+3].
+\label{eq:four-phases}
+\end{align}
+
+Cada salida requiere solamente 16 multiplicaciones, frente a las
+64 de la implementación directa. La reducción aritmética teórica
+es, por lo tanto, un factor $L=4$.
+
+Esta transformación no modifica los coeficientes del filtro ni
+su respuesta funcional. Únicamente reorganiza las operaciones
+para evitar los productos asociados a las posiciones de relleno.
+
+\subsection{Remuestreo racional y procesamiento paralelo}
+
+El sistema implementado realiza un remuestreo racional por un factor
+$L/M=4/3$. Para ello, después de la interpolación y el filtrado se
+aplica un diezmado por $M=3$, conservando una de cada tres muestras
+de la secuencia a tasa alta. El filtro debe eliminar las imágenes de la
+interpolación y limitar el espectro antes del diezmado. Para cumplir ambas
+funciones se utiliza un corte de $\pi/\max(L,M)=\pi/4$, referido a la tasa
+alta $Lf_s$.
+
+La salida del remuestreador directo queda definida por
 
 \begin{equation}
-R_{\mathrm{directa}}=NLf_s,
-\qquad
-R_{\mathrm{poli}}=\frac{N}{L}Lf_s=Nf_s.
-\label{eq:operation-rates}
+y[n]=y_u[Mn]
+=\sum_{k=0}^{N-1}h[k]x_u[Mn-k].
+\label{eq:rational-direct}
 \end{equation}
 
-Por lo tanto, el ahorro aritmético teórico de la forma polifásica es un factor $L$.
-Este factor no se traduce necesariamente de forma directa a potencia total, ya que
-también intervienen la red de clock, los registros, la lógica de control y el área.
+La formulación polifásica equivalente se obtiene definiendo
+
+\begin{equation}
+m_n=\left\lfloor\frac{Mn}{L}\right\rfloor,
+\qquad
+p_n=Mn\bmod L.
+\label{eq:phase-selection}
+\end{equation}
+
+Así, cada muestra de salida puede calcularse directamente a
+partir de la secuencia original:
+
+\begin{equation}
+y[n]=
+\sum_{r=0}^{N/L-1}E_{p_n}[r]x[m_n-r].
+\label{eq:rational-polyphase}
+\end{equation}
+
+Para $L=4$ y $M=3$, el patrón de fases es periódico:
+
+\begin{equation}
+p_n=3n\bmod4
+\quad\Rightarrow\quad
+\{0,3,2,1,0,3,2,1,\ldots\}.
+\label{eq:phase-pattern}
+\end{equation}
+
+A diferencia de una implementación secuencial, donde las salidas
+se producen individualmente, las arquitecturas de este trabajo
+procesan bloques completos en paralelo.
+
+En cada ciclo válido se reciben $P_{\mathrm{in}}=90$ muestras y
+se calculan $P_{\mathrm{out}}=120$ salidas, cumpliendo
+
+\begin{equation}
+P_{\mathrm{out}}=
+P_{\mathrm{in}}\frac{L}{M}=120.
+\label{eq:parallelism}
+\end{equation}
+
+La tasa de muestras de entrada es $f_s=90f_{\mathrm{clk}}$ y la de salida es
+$f_{\mathrm{out}}=120f_{\mathrm{clk}}=(4/3)f_s$ para bloques válidos en todos
+los ciclos.
+
+Para el bloque $b$ y la salida local $j$, con
+$j=0,\ldots,119$, la selección polifásica está determinada por
+
+\begin{equation}
+m=90b+\left\lfloor\frac{3j}{4}\right\rfloor,
+\qquad
+p=3j\bmod4.
+\label{eq:block-indexing}
+\end{equation}
+
+Como cada bloque contiene 30 períodos de tres entradas y cuatro
+salidas, el patrón de fases se repite entre bloques. Por ello,
+la selección de fase y los índices de muestras pueden determinarse
+en tiempo de elaboración, sin necesidad de un contador de fase
+dinámico.
+
+Ambas arquitecturas requieren conservar información del bloque
+anterior para mantener la continuidad del filtrado. La versión
+directa almacena las últimas $N-1=63$ posiciones de tasa alta,
+mientras que la versión polifásica conserva las últimas
+$N/L-1=15$ muestras originales.
+
+En la arquitectura directa se calculan las 120 salidas conservadas
+por el diezmado, utilizando un FIR de 64 taps para cada una.
+La versión polifásica calcula las mismas 120 salidas, pero emplea
+un FIR de 16 taps con la fase correspondiente.
+
+En consecuencia, las cantidades de multiplicadores son
+
+\begin{equation}
+N_{\mathrm{mult,directa}}=120\cdot64=7680,
+\label{eq:mult-direct}
+\end{equation}
+
+\begin{equation}
+N_{\mathrm{mult,poli}}=120\cdot16=1920.
+\label{eq:mult-poly}
+\end{equation}
+
+Por construcción, 5760 multiplicadores de la arquitectura directa
+procesan posiciones de relleno. Para evitar que la síntesis los
+elimine por propagación de constantes, dichas posiciones se
+alimentan mediante una entrada configurable \texttt{i\_fill},
+cuyo valor se establece en cero durante la verificación.
 
 \subsection{Componentes de la potencia}
 
@@ -208,17 +353,36 @@ P_{\mathrm{switching}}=\alpha C_L V_{DD}^{2}f_{\mathrm{clk}},
 donde $\alpha$ representa la actividad de conmutación. La potencia interna se
 disipa dentro de las celdas debido a la carga de nodos internos y a la conducción
 simultánea de transistores durante las transiciones. Ambas forman la potencia
-dinámica y dependen de la actividad, la frecuencia, los slews y las cargas.
-
-La potencia de leakage está presente incluso cuando el circuito no conmuta. Depende
+dinámica y dependen de la actividad, la frecuencia, los slews y las cargas. Luego,
+la potencia de leakage está presente incluso cuando el circuito no conmuta. Depende
 del tipo de celda, su estado lógico, la tensión de alimentación y la temperatura, y
-crece con el área implementada. Para comparar diseños que realizan distinto trabajo
-por ciclo se utiliza también la energía por muestra de salida:
+crece con el área implementada.
+
+Para comparar arquitecturas que implementan el mismo remuestreador
+se utiliza también la energía consumida por muestra de salida.
+Considerando una tasa de salida $f_{\mathrm{out}}=(L/M)f_s$,
 
 \begin{equation}
-E_{\mathrm{muestra}}=\frac{P_{\mathrm{total}}}{Lf_s}.
+E_{\mathrm{muestra}}=
+\frac{P_{\mathrm{total}}}{f_{\mathrm{out}}}
+=
+\frac{P_{\mathrm{total}}}{(L/M)f_s}.
 \label{eq:energy-per-sample}
 \end{equation}
+
+Dado que ambas arquitecturas entregan $P_{\mathrm{out}}=120$
+muestras por ciclo válido, para un procesamiento continuo se obtiene
+
+\begin{equation}
+E_{\mathrm{muestra}}=
+\frac{P_{\mathrm{total}}}{120f_{\mathrm{clk}}}.
+\label{eq:energy-per-sample-parallel}
+\end{equation}
+
+Si solamente una fracción $d$ de los ciclos contiene bloques válidos, la tasa
+media de salidas útiles es $120d f_{\mathrm{clk}}$. En ese caso, la energía se
+calcula como $E_{\mathrm{muestra}}=P_{\mathrm{total}}/(120d f_{\mathrm{clk}})$,
+para contabilizar únicamente las muestras efectivamente entregadas.
 
 \subsection{Glitches y actividad real}
 
@@ -250,20 +414,27 @@ arquitecturas.
 
 \begin{table}[H]
     \centering
-    \caption{Parámetros comunes del interpolador.}
+    \caption{Parámetros comunes del remuestreador $4/3$.}
     \label{tab:parametros-comunes}
     \begin{tabular}{@{}ll@{}}
         \toprule
         \textbf{Parámetro} & \textbf{Valor} \\
         \midrule
         Factor de interpolación, $L$ & 4 \\
-        Cantidad de taps, $N$ & 16 \\
+        Factor de diezmado, $M$ & 3 \\
+        Cantidad de taps del prototipo, $N$ & 64 \\
+        Fases y taps por fase & 4 fases de 16 taps \\
+        Paralelismo de entrada, $P_{\mathrm{in}}$ & 90 muestras/ciclo válido \\
+        Paralelismo de salida, $P_{\mathrm{out}}$ & 120 muestras/ciclo válido \\
         Formato de entrada & signed Q1.11, 12 bits \\
         Formato de coeficientes & signed Q1.11, 12 bits \\
         Formato de salida & signed Q1.11, 12 bits \\
-        Cantidad de muestras de entrada & 2000 \\
-        Cantidad de muestras de salida & 8015 \\
-        Tasa del clock & $L f_s$ \\
+        Cantidad de bloques del estímulo & 23 \\
+        Cantidad de muestras de entrada & 2070 \\
+        Cantidad de muestras de salida & 2760, sin cola del FIR \\
+        Tasa de salida & $(4/3)f_s$ \\
+        Tasa del clock & $f_s/90$ \\
+        Conversión a la salida & Truncamiento y saturación signed \\
         \bottomrule
     \end{tabular}
 \end{table}
@@ -273,36 +444,42 @@ arquitecturas.
 
 \subsubsection*{Diseño y cuantización del filtro}
 
-El filtro prototipo se diseñó mediante \texttt{firwin}, utilizando una ventana de
-Hamming y una frecuencia de corte normalizada igual a $1/L$. Su ganancia se
-multiplicó por $L$ para compensar la reducción de amplitud introducida por la
-inserción de ceros. Los coeficientes se redondearon al formato signed Q1.11.
+El filtro prototipo de 64 taps se diseñó mediante \texttt{firwin}, con una
+ventana de Hamming y una frecuencia de corte normalizada a Nyquist de la tasa
+alta igual a $1/\max(L,M)=1/4$. Es un pasabajos de fase lineal que cumple las
+funciones de anti-imagen y anti-aliasing. Su ganancia se multiplicó por $L=4$
+para compensar la pérdida de amplitud debida a la inserción de ceros. Luego se
+redondearon los coeficientes al formato signed Q1.11.
 
-Los coeficientes enteros resultantes son
-
-\begin{equation}
-\begin{split}
-h={}&[-11,-44,-101,-88,167,740,1462,1971,\\
-     &\phantom{[}1971,1462,740,167,-88,-101,-44,-11].
-\end{split}
-\label{eq:quantized-coefficients}
-\end{equation}
-
-La distribución de estos coeficientes entre las cuatro fases se muestra en la
-Tabla~\ref{tab:coeficientes-fases}.
+La Tabla~\ref{tab:coeficientes-fases} contiene los 64 coeficientes enteros,
+repartidos según $E_p[r]=h[4r+p]$. El coeficiente $E_p[0]$ multiplica la muestra
+más reciente de la ventana.
 
 \begin{table}[H]
     \centering
-    \caption{Coeficientes enteros Q1.11 de los subfiltros polifásicos.}
+    \caption{Coeficientes enteros Q1.11. Los valores reales se obtienen al dividir
+    las palabras de la tabla por $2^{11}$.}
     \label{tab:coeficientes-fases}
-    \begin{tabular}{@{}crrrr@{}}
+    \begin{tabular}{@{}rrrrr@{}}
         \toprule
-        \textbf{Fase} & $E_p[0]$ & $E_p[1]$ & $E_p[2]$ & $E_p[3]$ \\
+        $r$ & $E_0[r]$ & $E_1[r]$ & $E_2[r]$ & $E_3[r]$ \\
         \midrule
-        0 & $-11$  & 167  & 1971 & $-88$  \\
-        1 & $-44$  & 740  & 1462 & $-101$ \\
-        2 & $-101$ & 1462 & 740  & $-44$  \\
-        3 & $-88$  & 1971 & 167  & $-11$  \\
+        0 & -3 & -7 & -7 & -4 \\
+        1 & 4 & 12 & 15 & 8 \\
+        2 & -9 & -27 & -33 & -16 \\
+        3 & 19 & 54 & 63 & 31 \\
+        4 & -36 & -99 & -115 & -55 \\
+        5 & 63 & 177 & 205 & 99 \\
+        6 & -117 & -337 & -409 & -212 \\
+        7 & 278 & 952 & 1601 & 1998 \\
+        8 & 1998 & 1601 & 952 & 278 \\
+        9 & -212 & -409 & -337 & -117 \\
+        10 & 99 & 205 & 177 & 63 \\
+        11 & -55 & -115 & -99 & -36 \\
+        12 & 31 & 63 & 54 & 19 \\
+        13 & -16 & -33 & -27 & -9 \\
+        14 & 8 & 15 & 12 & 4 \\
+        15 & -4 & -7 & -7 & -3 \\
         \bottomrule
     \end{tabular}
 \end{table}
@@ -318,7 +495,7 @@ Tabla~\ref{tab:coeficientes-fases}.
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.88\linewidth]{filter_frequency_response.png}
-    \caption{Respuesta en frecuencia del filtro pasabajos anti-imagen.}
+    \caption{Respuesta en frecuencia del filtro pasabajos anti-imagen y anti-aliasing.}
     \label{fig:filter-frequency-response}
 \end{figure}
 
@@ -326,12 +503,14 @@ Tabla~\ref{tab:coeficientes-fases}.
 
 Las muestras y los coeficientes se representan con 12 bits y 11 bits
 fraccionarios. Cada multiplicación genera un producto signed de 24 bits con 22
-bits fraccionarios, que luego serán los operandos del arbol de sumas, al cual 
-se dejará desarrollar su resolución completa.
+bits fraccionarios. Los productos alimentan un árbol balanceado de sumas sin
+recortes intermedios. La clase \texttt{FixedPoint} aumenta automáticamente el
+ancho en un bit por nivel: seis niveles para 64 productos y cuatro niveles
+para 16 productos.
 
 \begin{table}[H]
     \centering
-    \caption{Formatos internos utilizados por el RTL.}
+    \caption{Formatos del modelo de referencia que debe respetar el RTL.}
     \label{tab:formatos-internos}
     \begin{tabular}{@{}lcc@{}}
         \toprule
@@ -339,15 +518,44 @@ se dejará desarrollar su resolución completa.
         \midrule
         Entrada y coeficiente & 12 & 11 \\
         Producto & 24 & 22 \\
-        Acumulador directo, 16 taps & 28 & 22 \\
-        Acumulador por fase, 4 taps & 26 & 22 \\
+        Acumulador directo, 64 taps & 30 & 22 \\
+        Acumulador por fase, 16 taps & 28 & 22 \\
         Salida & 12 & 11 \\
         \bottomrule
     \end{tabular}
 \end{table}
 
 La conversión a la salida trunca los bits fraccionarios menos significativos y
-satura cuando la magnitud excede el rango signed de 12 bits.
+satura cuando el resultado excede el rango signed de 12 bits. Para el truncado,
+se descartan 11 bits mediante desplazamiento aritmético y luego se limita el 
+entero al intervalo $[-2048,2047]$. Para valores negativos, este descarte 
+corresponde a redondear hacia menos infinito. El truncamiento de la salida 
+es independiente del redondeo utilizado al cuantizar los coeficientes y 
+el estímulo.
+
+\subsubsection*{Organización del modelo}
+
+El archivo \path{TP3/model/reference_model.py} contiene un único bloque
+aritmético, \texttt{fir\_model}. Esta función recibe una ventana de muestras y
+un banco de coeficientes, y calcula una salida con la aritmética de la
+Tabla~\ref{tab:formatos-internos}. El índice cero de la ventana corresponde
+a la muestra más reciente.
+
+La función \texttt{interp\_zeros} arma el regresor con las muestras de tasa
+alta y las 63 posiciones de historia. Para la salida $n$ selecciona una ventana
+que termina en la posición $3n$ del bloque actual y llama al FIR de 64 taps.
+Únicamente calcula las salidas conservadas por el diezmado.
+
+La función \texttt{interp\_poly} arma el regresor con las entradas originales
+y las 15 muestras de historia. Para cada salida calcula $m=\lfloor3n/4\rfloor$
+y $p=3n\bmod4$, toma la ventana que termina en la muestra $m$ y llama al mismo
+FIR con los 16 coeficientes de la fase $p$.
+
+Ambas funciones devuelven las salidas y la historia necesaria para la próxima
+llamada. Cuando no se entrega historia, la memoria se inicializa en cero. Así,
+las mismas funciones permiten procesar la secuencia completa o bloques de 90
+entradas. El notebook \path{TP3/model/reference_model.ipynb} ejecuta las 
+verificaciones, genera las figuras y exporta los vectores.
 
 \subsubsection*{Estímulo de entrada común}
 
@@ -361,8 +569,11 @@ x[n]=\sin(2\pi\,0.073n)
 \label{eq:stimulus}
 \end{equation}
 
-Se emplea una semilla fija para el rng y luego se cuantiza la señal a Q1.11. De
-esta manera el estímulo es reproducible y puede reutilizarse sin modificaciones
+Se generan 2070 muestras, correspondientes a 23 bloques de 90 entradas.
+La señal de la Ecuación~\eqref{eq:stimulus} se escala por un único factor para
+fijar su pico en $-6\,\mathrm{dBFS}$. Se utiliza el generador
+\texttt{default\_rng} y luego se cuantiza a Q1.11. De esta manera 
+el estímulo es reproducible y puede reutilizarse sin modificaciones
 en las simulaciones RTL, GLS y en todas las estimaciones de potencia.
 
 \begin{figure}[H]
@@ -382,7 +593,7 @@ en las simulaciones RTL, GLS y en todas las estimaciones de potencia.
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.88\linewidth]{interpolator_output.png}
-    \caption{Salida fixed-point del interpolador.}
+    \caption{Salida de punto fijo del remuestreador $4/3$.}
     \label{fig:interpolator-output}
 \end{figure}
 
@@ -392,19 +603,6 @@ en las simulaciones RTL, GLS y en todas las estimaciones de potencia.
     \caption{Espectro de salida y error muestra a muestra entre los dos modelos.}
     \label{fig:output-spectrum-error}
 \end{figure}
-
-\subsubsection*{Equivalencia de los modelos}
-
-El modelo implementa por separado la interpolación mediante inserción de ceros y
-la forma polifásica de la Ecuación~\ref{eq:polyphase}. Ambas rutas utilizan los
-mismos coeficientes cuantizados y la misma aritmética de punto fijo. La comparación
-muestra a muestra confirmó que las dos generan exactamente la misma secuencia, sin
-diferencias de cuantización.
-
-Para 2000 muestras de entrada, el archivo de referencia contiene 8015 muestras de
-salida. Esta longitud incluye la respuesta transitoria final de la convolución y
-los ceros necesarios para conservar la misma convención en las dos formas del
-modelo.
 
 % ---------------------------------------------------------------------------
 \subsection{Implementaciones RTL}
@@ -708,14 +906,6 @@ una cobertura de anotación del 100\,\% en ambas arquitecturas.
         \bottomrule
     \end{tabular}
 \end{table}
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.75\linewidth]{power_components.pdf}
-    \caption{Comparación de potencia por componente a 2 GHz con actividad de
-    GLS y retardos SDF.}
-    \label{fig:power-components}
-\end{figure}
 
 La energía por muestra se calculó dividiendo la potencia total por la tasa de
 salida, que coincide con la frecuencia de clock de 2 GHz. La arquitectura
